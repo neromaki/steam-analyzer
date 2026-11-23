@@ -10,9 +10,8 @@ import { fmtDate, fmtInt } from '../../lib/format';
 import { qLabel } from '../../lib/trends';
 import { useSearchParams } from 'react-router-dom';
 import { useUpdateParams } from '../../lib/url';
-import { useDraft } from '../../hooks/useDraft';
 import { useHitVectors, useThemeVectors } from '../../state/theme';
-import { GameLink, Section, TagNames, useInView } from './common';
+import { GameLink, ParamSlider as Slider, Section, TagNames, useInView } from './common';
 
 const LOOKBACK = 12, CAND_REVIEWS = 1000;
 
@@ -36,20 +35,6 @@ function useCopyWorker(input: CopyInput | null) {
     worker.current.postMessage({ id, input });
   }, [input]);
   return { out, busy };
-}
-
-function Slider({ k, label, value, min, max, step, fmt }: {
-  k: string; label: string; value: number; min: number; max: number; step: number; fmt: (v: number) => string;
-}) {
-  const update = useUpdateParams();
-  const [draft, edit, flush] = useDraft(value, v => update(n => n.set(k, String(v))), 350);
-  return (
-    <label className="cp-slider">
-      <span className="muted">{label} <b className="gf-value">{fmt(draft)}</b></span>
-      <input type="range" min={min} max={max} step={step} value={draft} className="gf-slider"
-             onChange={e => edit(e.target.valueAsNumber)} onPointerUp={flush} onKeyUp={flush} />
-    </label>
-  );
 }
 
 export default function Copies({ theme, tq, dataQ, firstQ, wDefault, sDefault }: {

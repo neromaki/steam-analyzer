@@ -458,3 +458,62 @@ button.gt-tag:hover { color: var(--text); border-color: var(--accent); }
   .tt-count { margin-left: 0; }
   .cp-slider { width: 100%; }
 }
+
+/* ---------------------------------------------------------------- game page */
+.game-page { display: flex; flex-direction: column; gap: 12px; }
+.game-page > .tag-row { margin-top: 0; }
+.wchip { position: relative; overflow: hidden; padding-bottom: 2px; }
+.wchip .wbar { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--accent); opacity: 0.8; }
+.game-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 24px; padding: 10px 12px; position: sticky; top: 0; z-index: 5; }
+.game-bar .global-range { margin-left: auto; }
+.gc { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: flex-end; }
+.gc-select { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.gc-select select { height: 26px; }
+.verdict { font-size: 17px; }
+.v-started { color: var(--good); }
+.v-rode { color: var(--accent-strong); }
+.wave-figs { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 10px 0 0; font-size: 12px; }
+.wave-figs div { display: flex; gap: 6px; align-items: baseline; }
+.wave-figs dt { color: var(--muted); }
+.wave-figs dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.linkish { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-variant-numeric: tabular-nums; }
+.linkish:hover { text-decoration: underline; color: var(--accent-strong); }
+.dtable tr.sel td { background: var(--accent-bg); }
+.tset-more { margin: 6px 0 0; font-size: 12px; }
+.look-scroll { max-height: 560px; }
+.look-more { margin: 8px; }
+
+.drawer-wrap { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.35); display: flex; justify-content: flex-end; }
+.drawer {
+  width: min(560px, 100%); height: 100%; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--border);
+  box-shadow: var(--shadow); padding: 12px 16px 24px; outline: none; display: flex; flex-direction: column; gap: 8px;
+}
+.drawer-head { display: flex; align-items: center; justify-content: space-between; }
+.drawer h2 { margin: 0; font-size: 16px; }
+.drawer h3 { margin: 8px 0 4px; font-size: 13px; color: var(--text-strong); }
+.drawer p { margin: 0; }
+.why-pair { font-size: 14px; }
+.why-score { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.why-score div { display: flex; flex-direction: column; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.why-score b { font-size: 18px; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.why-cell { display: flex; align-items: center; gap: 6px; min-width: 140px; }
+.why-cell span { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.why-bar { display: inline-block; height: 8px; border-radius: 0 4px 4px 0; max-width: 100px; flex: none; }
+.why-bar.s1 { background: var(--s1); }
+.why-only { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.why-only p { display: flex; flex-wrap: wrap; gap: 4px; }
+.why-desc { display: grid; gap: 10px; font-size: 12.5px; }
+.why-desc p { padding: 8px 10px; background: var(--panel-2); border-radius: 6px; }
+
+.inf-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 6px; min-height: 28px; }
+.inf-bar .spacer { flex: 1; }
+.inf-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12.5px; }
+.yr-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.yr-legend i { display: inline-block; width: 120px; height: 8px; border-radius: 4px; }
+
+@media (max-width: 720px) {
+  .game-bar { position: static; }
+  .game-bar .global-range { margin-left: 0; }
+  .why-only { grid-template-columns: minmax(0, 1fr); }
+  .why-score b { font-size: 16px; }
+}

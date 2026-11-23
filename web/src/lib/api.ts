@@ -118,8 +118,14 @@ export const fetchGame = (appid: number) => rpc<Game | null>('game', { p_appid: 
 
 // [appid, name, release_date, release_q, coming_soon, reviews, pct_positive, developer, tags[1:8], sim, tag_sim, text_sim]
 export type Neighbor = [number, string, string | null, number | null, boolean, number, number, string, number[], number, number, number];
-export const gameNeighbors = (appid: number, p: { wText: number; minSim: number; limit?: number }, f: Floor) =>
-  rpc<{ rows: Neighbor[] }>('game_neighbors', { p_appid: appid, p, f });
+export interface SimParams { wText: number; minSim: number }
+/** Every game at least minSim similar (the `limit` most similar as rows), and per-quarter counts of
+ *  all released matches: [release_q, n_all, n_other_developers]. */
+export const gameNeighbors = (appid: number, p: SimParams & { limit?: number }, f: Floor) =>
+  rpc<{ n: number; counts: [number, number, number][]; rows: Neighbor[] }>('game_neighbors', { p_appid: appid, p, f });
+/** Follower counts per quarter (other developers, released) for up to 12 games: [[appid, [[q, n]]]]. */
+export const gameWaves = (appids: number[], p: SimParams, f: Floor) =>
+  rpc<[number, [number, number][]][]>('game_waves', { p_appids: appids, p, f });
 
 export interface LeaderRow {
   preset: string; rank: number; appid: number; lift: number; share_before: number; share_after: number;

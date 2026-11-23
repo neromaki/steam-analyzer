@@ -1,30 +1,41 @@
-// Game page: details and tags now; trend-tracing tools arrive in milestone 5.
-import { useQuery } from '@tanstack/react-query';
+// Game page: details, then tools for tracing where the game sits in its trend: similar games on
+// a timeline, the follower wave after its release, likely trend-setters, look-alikes, why two
+// games are similar, and an expandable influence graph. Everything follows the page's date
+// range (each section can override it) and the similarity settings in the bar.
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { configured, fetchGame } from '../lib/api';
-import { useTags } from '../lib/data';
+import GameControls from '../components/game/GameControls';
+import Influence from '../components/game/Influence';
+import Lineage from '../components/game/Lineage';
+import LookAlikes from '../components/game/LookAlikes';
+import GameSetters from '../components/game/GameSetters';
+import Summary from '../components/game/Summary';
+import WaveChart from '../components/game/WaveChart';
+import WhySimilar from '../components/game/WhySimilar';
+import { GlobalRangeBar } from '../components/RangeControls';
+import type { Game } from '../lib/api';
+import { useMeta, useTags } from '../lib/data';
 import { fmtDate, fmtInt, fmtPrice, ratingTone, steamUrl } from '../lib/format';
+import { clusterTakeoff, countsMap, totalsByQ, verdict, wave, type Nb } from '../lib/lineage';
+import { dateToQ } from '../lib/trends';
 import { useLink } from '../lib/url';
+import { useGame, useGameSettings, useNeighbors } from '../state/game';
+import { RangeScope } from '../state/range';
+import { useAxis, useQuarterTotals } from '../state/theme';
 
-export default function GamePage() {
-  const raw = useParams().appid ?? '';
-  const appid = Number(raw);
+/** The page's own game as a similar-games row (similarity 1). */
+const selfNb = (g: Game): Nb => ({
+  appid: g.appid, name: g.name, date: g.release_date, q: g.release_q, soon: g.coming_soon, reviews: g.reviews,
+  pct: g.pct_positive, dev: g.developer, tags: g.tag_ids.slice(0, 8), sim: 1, ts: 1, xs: 1,
+});
+
+function Header({ g }: { g: Game }) {
   const link = useLink();
   const { byId } = useTags();
-  const q = useQuery({
-    queryKey: ['game', appid],
-    queryFn: () => fetchGame(appid),
-    enabled: configured && Number.isInteger(appid),
-  });
-
-  if (q.isLoading) return <div className="page muted">Loading…</div>;
-  if (q.error) return <div className="page"><div className="banner error">{q.error.message}</div></div>;
-  const g = q.data;
-  if (!g) return <div className="page"><div className="empty">No game with id {raw}.</div></div>;
-
   const tone = ratingTone(g.pct_positive, g.reviews);
+  const top = Math.max(1, ...g.tag_w);
   return (
-    <div className="page">
+    <>
       <div className="game-head">
         {g.header_image && <img className="game-capsule" src={g.header_image} alt="" width={460} height={215} />}
         <div className="game-info">
@@ -44,14 +55,75 @@ export default function GamePage() {
           <a href={steamUrl(g.appid)} target="_blank" rel="noreferrer">View on Steam ↗</a>
         </div>
       </div>
-      <div className="tag-row">
-        {g.tag_ids.map((id, i) => (
-          <Link key={id} className="chip" to={link('/search', { tab: 'tags', tags: String(id) })}
-                title={`${g.tag_w[i]} votes`}>
-            {byId.get(id)?.name ?? id}
-          </Link>
-        ))}
+      <div className="tag-row" aria-label="Tags, by votes">
+        {g.tag_ids.map((id, i) => {
+          const w = (g.tag_w[i] ?? 0) / top;
+          return (
+            <Link key={id} className="chip wchip" to={link('/search', { tab: 'tags', tags: String(id) })}
+                  title={`${byId.get(id)?.name ?? id}: weight ${g.tag_w[i]} of 100. Open in the Tags tab.`}>
+              {byId.get(id)?.name ?? id}
+              <i className="wbar" style={{ width: `${Math.max(8, w * 100)}%` }} aria-hidden="true" />
+            </Link>
+          );
+        })}
       </div>
-    </div>
+    </>
+  );
+}
+
+function Tools({ g }: { g: Game }) {
+  const s = useGameSettings();
+  const meta = useMeta();
+  const { dataQ, firstQ } = useAxis();
+  const totals = useQuarterTotals();
+  const nb = useNeighbors(g.appid, s);
+  const [why, setWhy] = useState<Nb | null>(null);
+  const self = useMemo(() => selfNb(g), [g]);
+  const dataDate = meta.data?.fetched_to ?? '9999-12-31';
+
+  const tot = useMemo(() => (totals.data ? totalsByQ(totals.data) : null), [totals.data]);
+  const tq = useMemo(() => (nb.data && tot && dataQ != null ? clusterTakeoff(countsMap(nb.data.counts, false), tot, firstQ, dataQ) : null),
+    [nb.data, tot, dataQ, firstQ]);
+  const hq = g.release_date && !g.coming_soon && g.release_date <= dataDate ? dateToQ(g.release_date) : null;
+  const w = useMemo(() => (nb.data && tot && dataQ != null && hq != null
+    ? wave(countsMap(nb.data.counts, true), tot, hq, firstQ, dataQ, s.wave) : null), [nb.data, tot, dataQ, firstQ, hq, s.wave]);
+  const v = hq == null ? 'unknown' : verdict(w, tq);
+
+  return (
+    <>
+      <div className="game-bar panel">
+        <GameControls s={s} />
+        <GlobalRangeBar />
+      </div>
+      <Summary nb={nb} self={self} w={w} tq={tq} verdict={v} released={hq != null} dataDate={dataDate} s={s} />
+      <Lineage nb={nb} self={self} dataDate={dataDate} onPick={setWhy} />
+      <div className="tags-grid even">
+        <WaveChart w={w} nb={nb} self={self} tq={tq} s={s} />
+        <GameSetters nb={nb} self={self} selfWave={w} tq={tq} s={s} tot={tot} dataDate={dataDate} onPick={setWhy} />
+      </div>
+      <LookAlikes nb={nb} self={self} dataDate={dataDate} onPick={setWhy} />
+      <Influence nb={nb} self={self} s={s} dataDate={dataDate} />
+      {why && <WhySimilar a={g} b={why} wText={s.wText} onClose={() => setWhy(null)} />}
+    </>
+  );
+}
+
+export default function GamePage() {
+  const raw = useParams().appid ?? '';
+  const appid = Number(raw);
+  const q = useGame(appid);
+
+  if (q.isLoading) return <div className="page muted">Loading…</div>;
+  if (q.error) return <div className="page"><div className="banner error">{q.error.message}</div></div>;
+  const g = q.data;
+  if (!g) return <div className="page"><div className="empty">No game with id {raw}.</div></div>;
+
+  return (
+    <RangeScope key={g.appid}>
+      <div className="page game-page">
+        <Header g={g} />
+        <Tools g={g} />
+      </div>
+    </RangeScope>
   );
 }

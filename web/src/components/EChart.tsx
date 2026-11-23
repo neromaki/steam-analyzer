@@ -1,13 +1,13 @@
 // Thin ECharts wrapper: modular imports (only the chart types we use), colours read from
 // the CSS theme tokens so charts follow the light/dark switch, and automatic resizing.
 /* eslint-disable react-refresh/only-export-components -- the colour hook and base option belong with the chart */
-import { BarChart, LineChart, ScatterChart } from 'echarts/charts';
+import { BarChart, GraphChart, LineChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { useEffect, useRef, useState } from 'react';
 
-echarts.use([LineChart, ScatterChart, BarChart, GridComponent, TooltipComponent, LegendComponent,
+echarts.use([LineChart, ScatterChart, BarChart, GraphChart, GridComponent, TooltipComponent, LegendComponent,
   MarkLineComponent, MarkAreaComponent, CanvasRenderer]);
 
 export type EOption = echarts.EChartsCoreOption;
@@ -65,9 +65,10 @@ interface Props {
   height?: number;
   onClick?: (p: { data: unknown; seriesIndex?: number; dataIndex: number }) => void;
   label: string; // accessible name
+  merge?: boolean; // merge updates into the chart (keeps a force layout's node positions) instead of replacing it
 }
 
-export default function EChart({ option, height = 280, onClick, label }: Props) {
+export default function EChart({ option, height = 280, onClick, label, merge }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
   const clickRef = useRef(onClick);
@@ -82,7 +83,7 @@ export default function EChart({ option, height = 280, onClick, label }: Props) 
     return () => { ro.disconnect(); c.dispose(); chart.current = null; };
   }, []);
 
-  useEffect(() => { chart.current?.setOption(option, { notMerge: true }); }, [option]);
+  useEffect(() => { chart.current?.setOption(option, { notMerge: !merge }); }, [option, merge]);
 
   return <div ref={el} className="echart" style={{ height }} role="img" aria-label={label} />;
 }

@@ -3,8 +3,10 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useDraft } from '../../hooks/useDraft';
 import { useTags } from '../../lib/data';
-import { idsParam, setIds, useLink, useUpdateParams } from '../../lib/url';
+import { idsParam, setIds, useUpdateParams } from '../../lib/url';
+import { useGameLink } from '../../state/game';
 import { RangeControl } from '../RangeControls';
 
 export function Section({ title, sub, rangeId, controls, children, className, id }: {
@@ -78,8 +80,8 @@ export function useChoice<T extends string>(key: string, values: readonly T[], f
 }
 
 export function GameLink({ appid, name }: { appid: number; name: string }) {
-  const link = useLink();
-  return <Link to={link(`/game/${appid}`)} title={name}>{name}</Link>;
+  const link = useGameLink();
+  return <Link to={link(appid)} title={name}>{name}</Link>;
 }
 
 export function TagNames({ ids, max = 4 }: { ids: number[]; max?: number }) {
@@ -111,5 +113,20 @@ export function Th<K extends string>({ k, label, sort, setSort, num, title }: {
         {label}<span className="gt-arrow" aria-hidden="true">{on ? (sort.dir === 1 ? '▲' : '▼') : ''}</span>
       </button>
     </th>
+  );
+}
+
+/** A slider bound to a URL param; the URL (and so any query) updates once the value settles. */
+export function ParamSlider({ k, label, value, min, max, step, fmt }: {
+  k: string; label: string; value: number; min: number; max: number; step: number; fmt: (v: number) => string;
+}) {
+  const update = useUpdateParams();
+  const [draft, edit, flush] = useDraft(value, v => update(n => n.set(k, String(v))), 350);
+  return (
+    <label className="cp-slider">
+      <span className="muted">{label} <b className="gf-value">{fmt(draft)}</b></span>
+      <input type="range" min={min} max={max} step={step} value={draft} className="gf-slider"
+             onChange={e => edit(e.target.valueAsNumber)} onPointerUp={flush} onKeyUp={flush} />
+    </label>
   );
 }
