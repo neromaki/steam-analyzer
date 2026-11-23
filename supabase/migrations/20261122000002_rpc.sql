@@ -123,53 +123,51 @@ end $$;
 --      revMin, revMax, sort: reviews|rating|released|name, dir: asc|desc, limit, offset}
 create or replace function search_games(p jsonb, f jsonb default null) returns json
 language plpgsql stable as $$
+-- Dynamic SQL so each call is planned with its real filters and sort: an unfiltered list can
+-- walk the matching index and stop after one page instead of sorting every game.
+-- p.count: 'both' (default) | 'none' (rows only) | 'only' (total only). The site asks for
+-- rows and the total separately, so re-sorting or paging never recounts.
 declare
   th theme_t := theme_of(p);
   fl floor_t := floor_of(f);
-  lim int := least(coalesce((p->>'limit')::int, 100), 500);
+  lim int := least(greatest(coalesce((p->>'limit')::int, 100), 0), 500);
   off int := greatest(coalesce((p->>'offset')::int, 0), 0);
-  srt text := coalesce(p->>'sort', 'reviews');
-  up boolean := coalesce(p->>'dir', 'desc') = 'asc';
+  dir text := case when p->>'dir' = 'asc' then 'asc' else 'desc' end;
+  cnt text := coalesce(p->>'count', 'both');
+  w text := 'passes(g, $2) and in_theme(g, $3)';
+  ord text;
+  total bigint;
   res json;
 begin
-  with m as (
-    select g.appid, g.name, g.release_date, g.coming_soon, g.early_access, g.is_free, g.price_gbp,
-           g.reviews, g.pct_positive, g.rating, g.developer, g.header_image, g.tag_ids[1:6] as tags
-    from games g
-    where passes(g, fl) and in_theme(g, th)
-      and case coalesce(p->>'status', 'all')
-            when 'upcoming' then g.coming_soon
-            when 'released' then not g.coming_soon
-            else true end
-      and ((p->>'from') is null or g.release_date >= (p->>'from')::date)
-      and ((p->>'to') is null or g.release_date <= (p->>'to')::date)
-      and ((p->>'minRating') is null or g.rating >= (p->>'minRating')::real)
-      and ((p->>'priceMin') is null or coalesce(g.price_gbp, 0) >= (p->>'priceMin')::numeric)
-      and ((p->>'priceMax') is null or coalesce(g.price_gbp, 0) <= (p->>'priceMax')::numeric)
-      and ((p->>'revMin') is null or g.reviews >= (p->>'revMin')::int)
-      and ((p->>'revMax') is null or g.reviews <= (p->>'revMax')::int)
-  ), s as (
-    select m.*, count(*) over () as total,
-           row_number() over (order by
-             case when srt = 'name' and up then name end asc,
-             case when srt = 'name' and not up then name end desc,
-             case when srt = 'rating' and up then rating end asc nulls last,
-             case when srt = 'rating' and not up then rating end desc nulls last,
-             case when srt = 'released' and up then release_date end asc nulls last,
-             case when srt = 'released' and not up then release_date end desc nulls last,
-             case when srt = 'reviews' and up then reviews end asc,
-             case when srt = 'reviews' and not up then reviews end desc,
-             appid) as rn
-    from m
-  )
-  select json_build_object(
-           'total', coalesce((select count(*) from m), 0),
-           'rows', coalesce(json_agg(json_build_array(appid, name, release_date, coming_soon, early_access,
-                                                      is_free, price_gbp, reviews, pct_positive, rating,
-                                                      developer, header_image, tags) order by rn), '[]'))
-    into res
-  from s where rn > off and rn <= off + lim;
-  return res;
+  if p->>'status' = 'upcoming' then w := w || ' and g.coming_soon';
+  elsif p->>'status' = 'released' then w := w || ' and not g.coming_soon'; end if;
+  if (p->>'from') is not null then w := w || $w$ and g.release_date >= ($1->>'from')::date$w$; end if;
+  if (p->>'to') is not null then w := w || $w$ and g.release_date <= ($1->>'to')::date$w$; end if;
+  if (p->>'minRating') is not null then w := w || $w$ and g.rating >= ($1->>'minRating')::real$w$; end if;
+  if (p->>'priceMin') is not null then w := w || $w$ and (g.is_free and ($1->>'priceMin')::numeric <= 0 or coalesce(g.price_gbp, 0) >= ($1->>'priceMin')::numeric)$w$; end if;
+  if (p->>'priceMax') is not null then w := w || $w$ and (g.is_free or coalesce(g.price_gbp, 0) <= ($1->>'priceMax')::numeric)$w$; end if;
+  if (p->>'revMin') is not null then w := w || $w$ and g.reviews >= ($1->>'revMin')::int$w$; end if;
+  if (p->>'revMax') is not null then w := w || $w$ and g.reviews <= ($1->>'revMax')::int$w$; end if;
+
+  if cnt <> 'none' then
+    execute 'select count(*) from games g where ' || w into total using p, fl, th;
+  end if;
+  if cnt = 'only' then return json_build_object('total', total); end if;
+
+  ord := case coalesce(p->>'sort', 'reviews')
+    when 'name' then format('name %s, appid', dir)
+    when 'rating' then format('rating %s nulls last, reviews desc, appid', dir)
+    when 'released' then format('release_date %s nulls last, appid', dir)
+    else format('reviews %s, appid', dir) end;
+  execute format($q$
+    select coalesce(json_agg(json_build_array(appid, name, release_date, coming_soon, early_access,
+                                              is_free, price_gbp, reviews, pct_positive, rating,
+                                              developer, header_image, tags) order by %1$s), '[]')
+    from (select g.appid, g.name, g.release_date, g.coming_soon, g.early_access, g.is_free, g.price_gbp,
+                 g.reviews, g.pct_positive, g.rating, g.developer, g.header_image, g.tag_ids[1:6] as tags
+          from games g where %2$s order by %1$s limit %3$s offset %4$s) s $q$, ord, w, lim, off)
+    into res using p, fl, th;
+  return json_build_object('total', total, 'rows', res);
 end $$;
 
 -- ---------------------------------------------------------------- shares over time

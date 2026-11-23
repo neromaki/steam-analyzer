@@ -43,6 +43,9 @@ create index if not exists games_name_trgm  on games using gin (name gin_trgm_op
 create index if not exists games_release_q  on games (release_q);
 create index if not exists games_release    on games (release_date);
 create index if not exists games_reviews    on games (reviews desc);
+-- Sort orders for the Games results list (an unfiltered page walks these and stops early).
+create index if not exists games_rating     on games (rating desc nulls last);
+create index if not exists games_name       on games (name);
 
 -- Fingerprints for similarity. Kept apart from games so list queries stay lean.
 -- Both vectors are unit length, so inner product = cosine similarity.
