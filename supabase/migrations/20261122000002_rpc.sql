@@ -69,11 +69,21 @@ $$;
 -- descriptions.
 do $$ begin
   create type theme_t as (inc int[], exc int[], match_all boolean, core boolean,
-                          q text, rx text, use_desc boolean);
+                          q text, rx text, use_desc boolean, desc_q int[], desc_rx int[]);
 exception when duplicate_object then null; end $$;
+-- desc_q / desc_rx (added later): appids whose description matches q / rx, looked up once
+-- per call (descriptions live in game_info). in_theme() must stay a plain expression with
+-- no sub-queries: Postgres only inlines it then, which lets it use the tag index; a
+-- sub-query inside made every themed scan call it per row (~10x slower).
+do $$ begin
+  if not exists (select 1 from pg_attribute where attrelid = (select typrelid from pg_type where typname = 'theme_t')
+                 and attname = 'desc_q') then
+    alter type theme_t add attribute desc_q int[], add attribute desc_rx int[];
+  end if;
+end $$;
 
 create or replace function theme_of(p jsonb) returns theme_t
-language sql immutable as $$
+language sql stable as $$
   select row(
     coalesce((select array_agg(x::int) from jsonb_array_elements_text(coalesce(p->'inc', '[]')) x), '{}'),
     coalesce((select array_agg(x::int) from jsonb_array_elements_text(coalesce(p->'exc', '[]')) x), '{}'),
@@ -81,7 +91,13 @@ language sql immutable as $$
     coalesce((p->>'core')::boolean, false),
     nullif(p->>'q', ''),
     nullif(p->>'rx', ''),
-    coalesce((p->>'desc')::boolean, false))::theme_t
+    coalesce((p->>'desc')::boolean, false),
+    case when coalesce((p->>'desc')::boolean, false) and nullif(p->>'q', '') is not null
+         then coalesce((select array_agg(i.appid) from game_info i
+                        where i.short_description ilike '%' || like_escape(p->>'q') || '%'), '{}') end,
+    case when coalesce((p->>'desc')::boolean, false) and nullif(p->>'rx', '') is not null
+         then coalesce((select array_agg(i.appid) from game_info i where i.short_description ~* (p->>'rx')), '{}') end
+  )::theme_t
 $$;
 
 create or replace function in_theme(g games, th theme_t, core boolean default null) returns boolean
@@ -91,13 +107,9 @@ language sql stable as $$
                  then (case when th.match_all then g.tag_ids[1:5] @> th.inc else g.tag_ids[1:5] && th.inc end)
                  else (case when th.match_all then g.tag_ids @> th.inc else g.tag_ids && th.inc end) end))
      and (cardinality(th.exc) = 0 or not (g.tag_ids && th.exc))
-     -- Descriptions live in game_info. An uncorrelated IN (...) is run once into a hash table;
-     -- a correlated EXISTS would look each game up separately.
      and (th.q is null or g.name ilike '%' || like_escape(th.q) || '%'
-          or (th.use_desc and g.appid in (select i.appid from game_info i
-                                          where i.short_description ilike '%' || like_escape(th.q) || '%')))
-     and (th.rx is null or g.name ~* th.rx
-          or (th.use_desc and g.appid in (select i.appid from game_info i where i.short_description ~* th.rx)))
+          or (th.use_desc and g.appid = any(th.desc_q)))
+     and (th.rx is null or g.name ~* th.rx or (th.use_desc and g.appid = any(th.desc_rx)))
 $$;
 
 -- ---------------------------------------------------------------- search bar
@@ -323,16 +335,17 @@ begin
 end $$;
 
 -- Distributions within a theme: review-count buckets (half-decades of log10), rating
--- buckets (5%), price buckets (GBP) and releases per month.
+-- buckets (5%), price buckets (GBP) and releases per month. p.from / p.to limit release dates.
 create or replace function theme_dist(p jsonb, f jsonb default null) returns json
 language plpgsql stable as $$
 declare th theme_t := theme_of(p); fl floor_t := floor_of(f); dd date := data_date();
+  d0 date := coalesce((p->>'from')::date, '1900-01-01'); d1 date := least(coalesce((p->>'to')::date, dd), dd);
 begin
   return (
     with m as materialized (
       select g.reviews, g.pct_positive, g.is_free, g.price_gbp, g.release_date
       from games g
-      where not g.coming_soon and g.release_date + 0 <= dd and passes(g, fl) and in_theme(g, th)
+      where not g.coming_soon and g.release_date + 0 between d0 and d1 and passes(g, fl) and in_theme(g, th)
     )
     select json_build_object(
       'reviews', (select json_agg(json_build_array(b, n) order by b) from (

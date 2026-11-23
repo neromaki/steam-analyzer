@@ -92,15 +92,19 @@ export type ThemeGame = [number, string, string | null, number | null, boolean, 
 export const themeGames = (p: Theme & { top?: number }, f: Floor) =>
   rpc<{ n_released: number; n_soon: number; top: ThemeGame[]; newest: ThemeGame[]; soon: ThemeGame[] }>('theme_games', { p, f });
 
-export const themeDist = (p: Theme, f: Floor) =>
+export const themeDist = (p: Theme & { from?: string; to?: string }, f: Floor) =>
   rpc<{ reviews: [number, number][]; rating: [number, number][]; price: [number, number][]; monthly: [string, number][] }>('theme_dist', { p, f });
 
-// new: [appid, release_q, coming_soon, reviews, developer, tag_ids, tag_w, text(int8 x127)]
-// cand: same + [name, release_date, pct_positive]
+// [appid, release_q, coming_soon, reviews, developer, tag_ids, tag_w, text (ints, x127)]
 export type VecRow = [number, number | null, boolean, number, string, number[], number[], number[]];
+// VecRow + [name, release_date, pct_positive]
 export type CandRow = [...VecRow, string, string, number];
-export const themeVectors = (p: Theme & { riseQ: number; lookback?: number; minReviews?: number; maxNew?: number }, f: Floor) =>
-  rpc<{ n_new: number; n_soon: number; new: VecRow[]; cand: CandRow[] }>('theme_vectors', { p, f });
+/** The theme's games released since riseQ (sampled to maxNew) and coming soon. */
+export const themeVectors = (p: Theme & { riseQ: number; maxNew?: number }, f: Floor) =>
+  rpc<{ n_new: number; n_soon: number; new: VecRow[] }>('theme_vectors', { p, f });
+/** Candidate hits from the years before riseQ: the same for every theme, so cache per quarter. */
+export const hitVectors = (p: { riseQ: number; lookback?: number; minReviews?: number }, f: Floor) =>
+  rpc<{ cand: CandRow[] }>('hit_vectors', { p, f });
 
 // ---------------------------------------------------------------- game page
 
@@ -126,4 +130,13 @@ export async function fetchLeaderboard(preset: string): Promise<LeaderRow[]> {
   const { data, error } = await supabase.from('leaderboard').select('*').eq('preset', preset).order('rank');
   if (error) throw new Error(error.message);
   return data as LeaderRow[];
+}
+
+/** Names (and basics) for a handful of games, e.g. the copies listed under a hit. */
+export async function fetchGameNames(appids: number[]): Promise<Map<number, { name: string; release_date: string | null; reviews: number }>> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  if (!appids.length) return new Map();
+  const { data, error } = await supabase.from('games').select('appid,name,release_date,reviews').in('appid', appids);
+  if (error) throw new Error(error.message);
+  return new Map((data as { appid: number; name: string; release_date: string | null; reviews: number }[]).map(r => [r.appid, r]));
 }

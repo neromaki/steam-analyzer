@@ -1,11 +1,15 @@
 // Search results: Games and Tags tabs. The header (query, tags, date range) stays put while the
-// results below scroll on their own. The Tags tab's analysis arrives in milestone 4.
+// results below scroll on their own.
 import { useSearchParams } from 'react-router-dom';
-import { GlobalRangeBar, RangeControl } from '../components/RangeControls';
+import { lazy, Suspense } from 'react';
+import { GlobalRangeBar } from '../components/RangeControls';
 import { useTags } from '../lib/data';
 import { idsParam, setIds, useUpdateParams } from '../lib/url';
 import { RangeScope } from '../state/range';
 import GamesTab from './GamesTab';
+
+// The Tags tab carries the chart library, so it loads on first use.
+const TagsTab = lazy(() => import('./TagsTab'));
 
 type Tab = 'games' | 'tags';
 
@@ -50,24 +54,9 @@ export default function Search() {
           {tab === 'games' ? (
             <GamesTab />
           ) : (
-            <>
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>Tags</h2>
-                  <div className="spacer" />
-                  <RangeControl id="tagtable" />
-                </div>
-                <div className="empty">The tag table arrives in milestone 4.</div>
-              </section>
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>Share over time</h2>
-                  <div className="spacer" />
-                  <RangeControl id="share" />
-                </div>
-                <div className="empty">Charts arrive in milestone 4.</div>
-              </section>
-            </>
+            <Suspense fallback={<div className="skel" style={{ height: 300 }} aria-label="Loading" />}>
+              <TagsTab />
+            </Suspense>
           )}
         </div>
       </div>
