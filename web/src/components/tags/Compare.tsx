@@ -53,9 +53,11 @@ export default function Compare({ theme, totals, dataQ, firstQ }: { theme: Theme
     })),
   });
   const data = qs.map(q => q.data);
+  // One string dependency: the number of sets (and so of queries) changes between renders.
+  const dataKey = fmtCmp(sets) + '|' + qs.map(q => q.dataUpdatedAt).join(',');
   const series = useMemo(() => sets.map((s, i) => ({
     set: s, s: data[i] ? shareSeries(data[i]!.series, totals, gran, range, dataQ, firstQ) : null,
-  })), [sets.map(s => fmtCmp([s])).join(), ...data, totals, gran, range, dataQ, firstQ]); // eslint-disable-line react-hooks/exhaustive-deps
+  })), [dataKey, totals, gran, range, dataQ, firstQ]); // eslint-disable-line react-hooks/exhaustive-deps
   const ready = series.filter((x): x is { set: CmpSet; s: ShareSeries } => !!x.s);
   const labels = ready[0]?.s.labels ?? [];
 
@@ -77,7 +79,7 @@ export default function Compare({ theme, totals, dataQ, firstQ }: { theme: Theme
     };
   }, [ready, labels, c, byId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canAddTheme = !!theme.inc?.length && !theme.q;
+  const canAddTheme = !!theme.inc?.length && !theme.q && !sets.some(s => key(s.ids) === key(theme.inc!));
   return (
     <Section title="Compare" rangeId="compare"
       controls={<Seg label="Granularity" value={gran} options={GRANS} onChange={setGran} />}

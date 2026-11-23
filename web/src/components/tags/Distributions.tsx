@@ -59,14 +59,24 @@ export default function Distributions({ theme }: { theme: Theme }) {
     };
   }, [d]);
   const monthly = useMemo<EOption | null>(() => {
-    if (!d?.monthly) return null;
+    if (!d?.monthly?.length) return null;
+    // Every month from the first release to the last, with zeros for empty months.
+    const have = new Map(d.monthly), months: string[] = [];
+    let [y, m] = d.monthly[0][0].split('-').map(Number);
+    const last = d.monthly[d.monthly.length - 1][0];
+    for (;;) {
+      const k = `${y}-${String(m).padStart(2, '0')}`;
+      months.push(k);
+      if (k >= last) break;
+      if (++m > 12) { m = 1; y++; }
+    }
     const b = baseOption(c);
     return {
       ...b,
       tooltip: { ...(b.tooltip as object), trigger: 'axis' },
-      xAxis: { ...(b.xAxis as object), type: 'category', data: d.monthly.map(m => m[0]), boundaryGap: false },
+      xAxis: { ...(b.xAxis as object), type: 'category', data: months, boundaryGap: false },
       yAxis: { ...(b.yAxis as object), type: 'value', axisLabel: { color: c.muted, fontSize: 11, formatter: (v: number) => fmtCompact(v) } },
-      series: [{ type: 'line', name: 'Releases', data: d.monthly.map(m => m[1]), showSymbol: false,
+      series: [{ type: 'line', name: 'Releases', data: months.map(k => have.get(k) ?? 0), showSymbol: false,
         lineStyle: { width: 2, color: c.series[0] }, itemStyle: { color: c.series[0] }, areaStyle: { color: c.series[0], opacity: 0.1 } }],
     };
   }, [d, c]);
