@@ -374,13 +374,15 @@ create or replace function theme_vectors(p jsonb, f jsonb default null) returns 
 language plpgsql stable as $$
 declare th theme_t := theme_of(p); fl floor_t := floor_of(f); dd date := data_date();
   rq int := (p->>'riseQ')::int; mx int := coalesce((p->>'maxNew')::int, 2000);
+  sw int := (p->>'soonWithin')::int;  -- coming-soon games dated within this many days; null = all
 begin
   return (
     with nw as materialized (
       select g.appid, g.release_q, g.coming_soon, g.reviews, g.developer, g.tag_ids
       from games g
       where passes(g, fl) and in_theme(g, th)
-        and (g.coming_soon or (g.release_date <= dd and g.release_q >= rq))
+        and ((g.coming_soon and (sw is null or g.release_date between dd and dd + sw))
+             or (not g.coming_soon and g.release_date <= dd and g.release_q >= rq))
     ),
     nw_l as (
       select * from (select nw.*, row_number() over (partition by coming_soon order by md5(appid::text)) as k from nw) z
@@ -414,6 +416,50 @@ begin
                                                          (select array_agg(round(x * 127)::int) from unnest(v.text_vec::real[]) x),
                                                          c.name, c.release_date, c.pct_positive))
                         from cand c join game_vec v using (appid) join game_info i using (appid)), '[]')));
+end $$;
+
+-- ---------------------------------------------------------------- home page
+
+-- Released games per tag per quarter over the last `quarters` quarters (4..24, default 12),
+-- the latest one partial: {q0, lq, totals: [n per quarter], rows: [[tagid, q, n]]}.
+create or replace function tag_quarters(p jsonb, f jsonb default null) returns json
+language plpgsql stable as $$
+declare fl floor_t := floor_of(f); dd date := data_date();
+  lq int := extract(year from data_date())::int * 4 + (extract(month from data_date())::int - 1) / 3;
+  q0 int := lq - least(greatest(coalesce((p->>'quarters')::int, 12), 4), 24) + 1;
+begin
+  return (
+    with base as materialized (
+      select g.release_q, g.tag_ids from games g
+      where not g.coming_soon and g.release_date + 0 <= dd and g.release_q between q0 and lq and passes(g, fl)
+    )
+    select json_build_object('q0', q0, 'lq', lq,
+      'totals', (select json_agg(coalesce(n, 0) order by q) from generate_series(q0, lq) q
+                 left join (select release_q, count(*) as n from base group by 1) c on c.release_q = q),
+      'rows', coalesce((select json_agg(json_build_array(t, release_q, n)) from (
+          select t, release_q, count(*) as n from base, unnest(base.tag_ids) as t group by 1, 2) s), '[]')));
+end $$;
+
+-- Tags of upcoming games vs games released in the last 12 months:
+-- {n_soon, n_recent, rows: [[tagid, n_soon, n_recent]]}. p.within: only coming-soon games dated
+-- within this many days (null = every coming-soon game, most of which have no date).
+create or replace function soon_radar(p jsonb, f jsonb default null) returns json
+language plpgsql stable as $$
+declare fl floor_t := floor_of(f); dd date := data_date(); sw int := (p->>'within')::int;
+begin
+  return (
+    with base as materialized (
+      select g.tag_ids, g.coming_soon as soon from games g
+      where passes(g, fl)
+        and ((g.coming_soon and (sw is null or g.release_date between dd and dd + sw))
+             or (not g.coming_soon and g.release_date + 0 > dd - 365 and g.release_date + 0 <= dd))
+    )
+    select json_build_object(
+      'n_soon', (select count(*) from base where soon),
+      'n_recent', (select count(*) from base where not soon),
+      'rows', coalesce((select json_agg(json_build_array(t, ns, nr)) from (
+          select t, count(*) filter (where soon) as ns, count(*) filter (where not soon) as nr
+          from base, unnest(base.tag_ids) as t group by t) s), '[]')));
 end $$;
 
 -- ---------------------------------------------------------------- game page
@@ -518,3 +564,5 @@ alter function theme_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_pl
 alter function hit_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function game_neighbors(int, jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function game_waves(int[], jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function tag_quarters(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function soon_radar(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
