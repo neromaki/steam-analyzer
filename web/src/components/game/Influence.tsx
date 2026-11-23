@@ -106,9 +106,10 @@ function GraphView({ self, rows, s, dataDate }: { self: Nb; rows: Nb[]; s: GameS
       },
       series: [{
         type: 'graph', layout: 'force', roam: true, draggable: true,
-        force: { repulsion: 260, edgeLength: [50, 140], gravity: 0.08, layoutAnimation: true },
+        force: { repulsion: 520, edgeLength: [70, 180], gravity: 0.06, layoutAnimation: true },
         edgeSymbol: ['none', 'arrow'], edgeSymbolSize: 7,
-        labelLayout: { hideOverlap: true },
+        // The root game is first in the data; its label always shows, others give way when crowded.
+        labelLayout: (p: { dataIndex: number }) => ({ hideOverlap: p.dataIndex !== 0 }),
         label: { show: true, position: 'right', color: c.text, fontSize: 11, formatter: (p: { data: { name: string } }) => p.data.name.length > 24 ? `${p.data.name.slice(0, 23)}…` : p.data.name },
         emphasis: { focus: 'adjacency', lineStyle: { width: 3 } },
         data: nodes.map(n => ({

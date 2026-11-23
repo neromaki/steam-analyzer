@@ -44,7 +44,7 @@ export default function WaveChart({ w, nb, self, tq, s }: {
     }
     return {
       ...b,
-      grid: { ...(b.grid as object), top: 28 },
+      grid: { ...(b.grid as object), top: 30 },
       tooltip: { ...(b.tooltip as object), trigger: 'axis', axisPointer: { type: 'line', lineStyle: { color: c.axis } },
         formatter: (ps: { dataIndex: number }[]) => {
           const i = view.idx[ps[0].dataIndex];
@@ -56,7 +56,7 @@ export default function WaveChart({ w, nb, self, tq, s }: {
         type: 'line', name: 'Look-alike share', data: view.idx.map(i => w.share[i]), showSymbol: false,
         lineStyle: { width: 2, color: c.series[1] }, itemStyle: { color: c.series[1] }, areaStyle: { color: c.series[1], opacity: 0.1 },
         markArea: { silent: true, label: { color: c.muted, fontSize: 11, position: 'insideTop' }, itemStyle: { opacity: 0.55 }, data: marks },
-        markLine: { symbol: 'none', silent: true, label: { fontSize: 11, position: 'insideEndTop' }, data: lines },
+        markLine: { symbol: 'none', silent: true, label: { fontSize: 11, position: 'end', distance: 4 }, data: lines },
       }],
     };
   }, [w, view, c, s.wave, tq]);

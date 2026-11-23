@@ -54,7 +54,7 @@ export default function Lineage({ nb, self, dataDate, onPick }: {
     ];
     series[0].markLine = {
       symbol: 'none', silent: true, lineStyle: { color: c.strong, width: 1.5 },
-      label: { formatter: 'This game', color: c.strong, fontSize: 11, position: 'insideEndTop' }, data: [{ xAxis: selfX }],
+      label: { formatter: 'This game', color: c.strong, fontSize: 11, position: 'end' }, data: [{ xAxis: selfX }],
     };
     if (groups.soon.length) {
       series[2].markArea = {
@@ -65,7 +65,7 @@ export default function Lineage({ nb, self, dataDate, onPick }: {
     }
     return {
       ...b,
-      grid: { ...(b.grid as object), top: 36 },
+      grid: { ...(b.grid as object), top: 46 },
       legend: { top: 0, left: 0, textStyle: { color: c.text }, itemWidth: 10, itemHeight: 10 },
       tooltip: { ...(b.tooltip as object), trigger: 'item',
         formatter: (p: { data: { g: Nb } }) => {
@@ -76,7 +76,7 @@ export default function Lineage({ nb, self, dataDate, onPick }: {
         } },
       xAxis: { ...(b.xAxis as object), type: 'time', splitLine: { show: false },
         min: range.from ? Date.parse(`${range.from}-01`) : undefined, max: groups.soon.length ? soonX + 100 * DAY : undefined },
-      yAxis: { ...(b.yAxis as object), type: 'value', name: 'Similarity', nameTextStyle: { color: c.muted, fontSize: 11, align: 'left' },
+      yAxis: { ...(b.yAxis as object), type: 'value',
         min: (v: { min: number }) => Math.floor(v.min * 20) / 20, max: 1, axisLabel: { color: c.muted, fontSize: 11, formatter: (v: number) => v.toFixed(2) } },
       series,
     };
