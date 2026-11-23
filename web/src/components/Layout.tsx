@@ -4,6 +4,7 @@ import { useMeta } from '../lib/data';
 import { fmtDate, fmtInt } from '../lib/format';
 import { useTheme } from '../lib/theme';
 import { useLink } from '../lib/url';
+import SearchBar from './SearchBar';
 
 function Logo() {
   return (
@@ -50,6 +51,7 @@ export default function Layout() {
         <Link to={link('/')} className="brand">
           <Logo /> Steam Trends
         </Link>
+        <SearchBar />
         <div className="spacer" />
         <DataStamp />
         <ThemeToggle />
