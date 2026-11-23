@@ -3,6 +3,7 @@
 Build the web app's database from the local Steam dump and upload it to Supabase.
 
     python pipeline/build_db.py                # build + upload (needs SUPABASE_DB_URL in .env)
+    python pipeline/build_db.py --migrate-only # apply schema/function changes only
     python pipeline/build_db.py --db postgresql://postgres:local@127.0.0.1:54329/postgres
     python pipeline/build_db.py --no-upload    # build + report only
 
@@ -272,16 +273,19 @@ def upload(db_url, games, tags, tvecs, xvecs, dim, boards, meta):
         conn.execute("set statement_timeout = 0")
         apply_migrations(conn)
         with conn.transaction():
-            conn.execute("truncate meta, leaderboard, game_vec, games, tags")
+            conn.execute("truncate meta, leaderboard, game_vec, game_info, games, tags")
             with conn.cursor().copy("copy tags (id, name, ix, idf, content, adult, n_games) from stdin") as cp:
                 for t in tags:
                     cp.write_row([t["id"], t["name"], t["ix"], t["idf"], t["content"], t["adult"], t["n_games"]])
             cols = ["appid", "name", "release_date", "release_q", "coming_soon", "early_access", "is_free",
-                    "price_gbp", "reviews", "pct_positive", "rating", "developer", "publisher", "header_image",
-                    "short_description", "tag_ids", "tag_w", "is_adult"]
+                    "price_gbp", "reviews", "pct_positive", "rating", "developer", "tag_ids", "is_adult"]
             with conn.cursor().copy(f"copy games ({', '.join(cols)}) from stdin") as cp:
                 for g in games:
                     cp.write_row([g[c] for c in cols])
+            info = ["appid", "publisher", "header_image", "short_description", "tag_w"]
+            with conn.cursor().copy(f"copy game_info ({', '.join(info)}) from stdin") as cp:
+                for g in games:
+                    cp.write_row([g[c] for c in info])
             print(f"  games copied ({time.time() - t0:.0f}s)", file=sys.stderr)
             with conn.cursor().copy("copy game_vec (appid, tag_vec, text_vec) from stdin") as cp:
                 for g, tv, xv in zip(games, tvecs, xvecs):
@@ -318,10 +322,24 @@ def main():
     ap = argparse.ArgumentParser(description="Build and upload the web app database.")
     ap.add_argument("--db", help="Postgres URL (default: SUPABASE_DB_URL from .env)")
     ap.add_argument("--no-upload", action="store_true", help="build and report only")
+    ap.add_argument("--migrate-only", action="store_true",
+                    help="apply supabase/migrations (schema and functions) and stop; data is untouched")
     ap.add_argument("--w-text", type=float, default=SIM_DEFAULTS["wText"])
     ap.add_argument("--min-sim", type=float, default=SIM_DEFAULTS["minSim"])
     ap.add_argument("--text-dims", type=int, default=128)
     a = ap.parse_args()
+
+    if a.migrate_only:
+        import psycopg
+        db = a.db or env("SUPABASE_DB_URL")
+        if not db:
+            sys.exit("No database URL: add SUPABASE_DB_URL to .env (see .env.example) or pass --db.")
+        with psycopg.connect(db, autocommit=False) as conn:
+            apply_migrations(conn)
+            conn.execute("notify pgrst, 'reload schema'")  # so the API sees new functions at once
+            conn.commit()
+        print("Migrations applied.")
+        return
 
     t0 = time.time()
     games, texts, names, fetched_to = read_games()

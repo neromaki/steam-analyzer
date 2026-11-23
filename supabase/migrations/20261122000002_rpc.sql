@@ -22,11 +22,19 @@ $$;
 do $$ begin
   create type floor_t as (min_reviews int, grace_days int, min_price numeric,
                           exclude_adult boolean, early_access boolean,
-                          exclude_tags int[], min_rating real);
+                          exclude_tags int[], min_rating real, grace_from date);
 exception when duplicate_object then null; end $$;
+-- grace_from (added later): the first release date still inside the grace period, worked
+-- out once per call. Calling data_date() per row made every floored scan ~50x slower.
+do $$ begin
+  if not exists (select 1 from pg_attribute where attrelid = (select typrelid from pg_type where typname = 'floor_t')
+                 and attname = 'grace_from') then
+    alter type floor_t add attribute grace_from date;
+  end if;
+end $$;
 
 create or replace function floor_of(f jsonb) returns floor_t
-language sql immutable as $$
+language sql stable as $$
   select row(
     coalesce((f->>'minReviews')::int, 0),
     coalesce((f->>'graceDays')::int, 0),
@@ -34,7 +42,8 @@ language sql immutable as $$
     coalesce((f->>'excludeAdult')::boolean, false),
     coalesce((f->>'earlyAccess')::boolean, true),
     coalesce((select array_agg(x::int) from jsonb_array_elements_text(coalesce(f->'excludeTags', '[]')) x), '{}'),
-    coalesce((f->>'minRating')::real, 0))::floor_t
+    coalesce((f->>'minRating')::real, 0),
+    data_date() - coalesce((f->>'graceDays')::int, 0))::floor_t
 $$;
 
 -- Does a game pass the floor? Coming-soon games skip the review/price/rating rules, and
@@ -45,7 +54,7 @@ language sql stable as $$
      and (fl.early_access or not g.early_access)
      and (cardinality(fl.exclude_tags) = 0 or not (g.tag_ids && fl.exclude_tags))
      and (g.coming_soon or (
-           (g.reviews >= fl.min_reviews or g.release_date > data_date() - fl.grace_days)
+           (g.reviews >= fl.min_reviews or g.release_date > fl.grace_from)
        and (fl.min_price <= 0 or g.is_free or g.price_gbp >= fl.min_price)
        and (fl.min_rating <= 0 or g.reviews < 10 or g.pct_positive >= fl.min_rating)))
 $$;
@@ -82,9 +91,13 @@ language sql stable as $$
                  then (case when th.match_all then g.tag_ids[1:5] @> th.inc else g.tag_ids[1:5] && th.inc end)
                  else (case when th.match_all then g.tag_ids @> th.inc else g.tag_ids && th.inc end) end))
      and (cardinality(th.exc) = 0 or not (g.tag_ids && th.exc))
+     -- Descriptions live in game_info. An uncorrelated IN (...) is run once into a hash table;
+     -- a correlated EXISTS would look each game up separately.
      and (th.q is null or g.name ilike '%' || like_escape(th.q) || '%'
-          or (th.use_desc and g.short_description ilike '%' || like_escape(th.q) || '%'))
-     and (th.rx is null or g.name ~* th.rx or (th.use_desc and g.short_description ~* th.rx))
+          or (th.use_desc and g.appid in (select i.appid from game_info i
+                                          where i.short_description ilike '%' || like_escape(th.q) || '%')))
+     and (th.rx is null or g.name ~* th.rx
+          or (th.use_desc and g.appid in (select i.appid from game_info i where i.short_description ~* th.rx)))
 $$;
 
 -- ---------------------------------------------------------------- search bar
@@ -103,15 +116,16 @@ begin
   if length(trim(coalesce(q, ''))) = 0 then return '[]'::json; end if;
   execute $s$
     with pre as (
-      select appid, name, release_date, reviews, coming_soon, header_image, 1 as k
+      select appid, name, release_date, reviews, coming_soon, 1 as k
       from games where name ilike $1 || '%'
       order by reviews desc limit 8),
     sub as (
-      select appid, name, release_date, reviews, coming_soon, header_image, 0 as k
+      select appid, name, release_date, reviews, coming_soon, 0 as k
       from games where name ilike '%' || $1 || '%' and not name ilike $1 || '%'
       order by reviews desc limit 8),
     top as (select * from (select * from pre union all select * from sub) u order by k desc, reviews desc limit 8)
-    select coalesce(json_agg(json_build_array(appid, name, release_date, reviews, coming_soon, header_image)
+    select coalesce(json_agg(json_build_array(appid, name, release_date, reviews, coming_soon,
+                                              (select i.header_image from game_info i where i.appid = top.appid))
                              order by k desc, reviews desc), '[]')
     from top $s$ into r using e;
   return r;
@@ -145,9 +159,12 @@ begin
   if (p->>'from') is not null then w := w || $w$ and g.release_date >= ($1->>'from')::date$w$; end if;
   if (p->>'to') is not null then w := w || $w$ and g.release_date <= ($1->>'to')::date$w$; end if;
   if (p->>'minRating') is not null then w := w || $w$ and g.rating >= ($1->>'minRating')::real$w$; end if;
-  -- Price filters skip coming-soon games with no price yet (like the floor's price rule).
-  if (p->>'priceMin') is not null then w := w || $w$ and ((g.coming_soon and g.price_gbp is null and not g.is_free) or coalesce(g.price_gbp, 0) >= ($1->>'priceMin')::numeric)$w$; end if;
-  if (p->>'priceMax') is not null then w := w || $w$ and (g.is_free or g.price_gbp is null or g.price_gbp <= ($1->>'priceMax')::numeric)$w$; end if;
+  -- Under "upcoming", games with no price yet pass the price filters (like the floor's price
+  -- rule); otherwise a price filter needs a known price (free counts as £0).
+  if (p->>'priceMin') is not null then w := w || $w$ and (coalesce(g.price_gbp, 0) >= ($1->>'priceMin')::numeric$w$
+    || case when p->>'status' = 'upcoming' then ' or (g.price_gbp is null and not g.is_free))' else ')' end; end if;
+  if (p->>'priceMax') is not null then w := w || $w$ and (g.is_free or g.price_gbp <= ($1->>'priceMax')::numeric$w$
+    || case when p->>'status' = 'upcoming' then ' or g.price_gbp is null)' else ')' end; end if;
   if (p->>'revMin') is not null then w := w || $w$ and g.reviews >= ($1->>'revMin')::int$w$; end if;
   if (p->>'revMax') is not null then w := w || $w$ and g.reviews <= ($1->>'revMax')::int$w$; end if;
 
@@ -171,9 +188,10 @@ begin
   execute format($q$
     select coalesce(json_agg(json_build_array(appid, name, release_date, coming_soon, early_access,
                                               is_free, price_gbp, reviews, pct_positive, rating,
-                                              developer, header_image, tags) order by %1$s), '[]')
+                                              developer, (select i.header_image from game_info i where i.appid = s.appid),
+                                              tags) order by %1$s), '[]')
     from (select g.appid, g.name, g.release_date, g.coming_soon, g.early_access, g.is_free, g.price_gbp,
-                 g.reviews, g.pct_positive, g.rating, g.developer, g.header_image, g.tag_ids[1:6] as tags
+                 g.reviews, g.pct_positive, g.rating, g.developer, g.tag_ids[1:6] as tags
           from %2$s where %3$s order by %1$s limit %4$s offset %5$s) s $q$, ord, src, w, lim, off)
     into res using p, fl, th;
   return json_build_object('total', total, 'rows', res);
@@ -182,7 +200,11 @@ end $$;
 -- ---------------------------------------------------------------- shares over time
 -- These are plpgsql (not plain SQL functions) so Postgres plans each call with the actual
 -- theme and floor values: that lets it use the tag index and drop unused conditions,
--- which is far faster than a generic plan.
+-- which is far faster than a generic plan (forced at the end of this file).
+
+-- "release_date + 0 <= dd" (not "release_date <= dd") when it matches nearly every game:
+-- otherwise the planner walks the release-date index and reads the table in random order,
+-- which is ~40x slower than a straight scan on the free tier.
 
 -- Floored release totals per quarter, split by "same dates as this year so far" (ytd), so
 -- the browser can build by-year, same-dates and by-quarter shares. [[q, ytd, n], ...]
@@ -194,7 +216,7 @@ begin
     select coalesce(json_agg(json_build_array(q, ytd, n) order by q, ytd), '[]')
     from (select g.release_q as q, to_char(g.release_date, 'MMDD') <= md as ytd, count(*) as n
           from games g
-          where not g.coming_soon and g.release_date <= dd and passes(g, fl)
+          where not g.coming_soon and g.release_date + 0 <= dd and passes(g, fl)
           group by 1, 2) s);
 end $$;
 
@@ -310,7 +332,7 @@ begin
     with m as materialized (
       select g.reviews, g.pct_positive, g.is_free, g.price_gbp, g.release_date
       from games g
-      where not g.coming_soon and g.release_date <= dd and passes(g, fl) and in_theme(g, th)
+      where not g.coming_soon and g.release_date + 0 <= dd and passes(g, fl) and in_theme(g, th)
     )
     select json_build_object(
       'reviews', (select json_agg(json_build_array(b, n) order by b) from (
@@ -327,18 +349,22 @@ begin
 end $$;
 
 -- Vectors for "what the theme's new games copy". The browser does the matching.
--- p = theme keys + {riseQ, lookback (quarters, 12), minReviews (1000), maxNew (2000)}.
--- New games are a deterministic sample when there are more than maxNew (coming soon: maxNew/2).
+-- theme_vectors: the theme's games released since riseQ (and coming soon).
+--   p = theme keys + {riseQ, maxNew (2000)}. More than maxNew → a deterministic sample
+--   (coming soon: maxNew/2). {n_new, n_soon, new: [[appid, release_q, coming_soon, reviews,
+--   developer, tag_ids, tag_w, text(int x127)]]}
+-- hit_vectors: the candidate hits (any tags) from the years before the rise, the same for every
+--   theme, so the browser caches them per rise quarter. p = {riseQ, lookback (12 quarters),
+--   minReviews (1000)}. {cand: [[...as above..., name, release_date, pct_positive]]}
 -- Text vectors are quantised to ints (x127) to keep the payload small.
 create or replace function theme_vectors(p jsonb, f jsonb default null) returns json
 language plpgsql stable as $$
 declare th theme_t := theme_of(p); fl floor_t := floor_of(f); dd date := data_date();
-  rq int := (p->>'riseQ')::int; lb int := coalesce((p->>'lookback')::int, 12);
-  mr int := coalesce((p->>'minReviews')::int, 1000); mx int := coalesce((p->>'maxNew')::int, 2000);
+  rq int := (p->>'riseQ')::int; mx int := coalesce((p->>'maxNew')::int, 2000);
 begin
   return (
     with nw as materialized (
-      select g.appid, g.release_q, g.coming_soon, g.reviews, g.developer, g.tag_ids, g.tag_w
+      select g.appid, g.release_q, g.coming_soon, g.reviews, g.developer, g.tag_ids
       from games g
       where passes(g, fl) and in_theme(g, th)
         and (g.coming_soon or (g.release_date <= dd and g.release_q >= rq))
@@ -346,32 +372,43 @@ begin
     nw_l as (
       select * from (select nw.*, row_number() over (partition by coming_soon order by md5(appid::text)) as k from nw) z
       where z.k <= case when z.coming_soon then mx / 2 else mx end
-    ),
-    cand as materialized (
-      select g.appid, g.name, g.release_date, g.release_q, g.reviews, g.pct_positive, g.developer, g.tag_ids, g.tag_w
-      from games g
-      where not g.coming_soon and g.release_date <= dd and g.reviews >= mr
-        and g.release_q between rq - lb and rq + 2 and passes(g, fl)
     )
     select json_build_object(
       'n_new', (select count(*) from nw where not coming_soon),
       'n_soon', (select count(*) from nw where coming_soon),
       'new', coalesce((select json_agg(json_build_array(n.appid, n.release_q, n.coming_soon, n.reviews, n.developer,
-                                                        n.tag_ids, n.tag_w,
+                                                        n.tag_ids, i.tag_w,
                                                         (select array_agg(round(x * 127)::int) from unnest(v.text_vec::real[]) x)))
-                       from nw_l n join game_vec v using (appid)), '[]'),
+                       from nw_l n join game_vec v using (appid) join game_info i using (appid)), '[]')));
+end $$;
+
+create or replace function hit_vectors(p jsonb, f jsonb default null) returns json
+language plpgsql stable as $$
+declare fl floor_t := floor_of(f); dd date := data_date();
+  rq int := (p->>'riseQ')::int; lb int := coalesce((p->>'lookback')::int, 12);
+  mr int := coalesce((p->>'minReviews')::int, 1000);
+begin
+  return (
+    with cand as materialized (
+      select g.appid, g.name, g.release_date, g.release_q, g.reviews, g.pct_positive, g.developer, g.tag_ids
+      from games g
+      where not g.coming_soon and g.release_date <= dd and g.reviews >= mr
+        and g.release_q between rq - lb and rq + 2 and passes(g, fl)
+    )
+    select json_build_object(
       'cand', coalesce((select json_agg(json_build_array(c.appid, c.release_q, false, c.reviews, c.developer,
-                                                         c.tag_ids, c.tag_w,
+                                                         c.tag_ids, i.tag_w,
                                                          (select array_agg(round(x * 127)::int) from unnest(v.text_vec::real[]) x),
                                                          c.name, c.release_date, c.pct_positive))
-                        from cand c join game_vec v using (appid)), '[]')));
+                        from cand c join game_vec v using (appid) join game_info i using (appid)), '[]')));
 end $$;
 
 -- ---------------------------------------------------------------- game page
 
 create or replace function game(p_appid int) returns json
 language sql stable as $$
-  select row_to_json(g) from games g where g.appid = p_appid
+  select (to_jsonb(g) || coalesce(to_jsonb(i) - 'appid', '{}'))::json
+  from games g left join game_info i using (appid) where g.appid = p_appid
 $$;
 
 -- Every game whose blended similarity to p_appid is >= minSim (and passes the floor).
@@ -406,3 +443,17 @@ begin
         round(sim::numeric, 4), round(ts::numeric, 4), round(xs::numeric, 4)) order by sim desc), '[]'))
     from r);
 end $$;
+
+-- ---------------------------------------------------------------- planning
+-- Plan every statement in these functions with the call's actual floor and theme. Without
+-- this, plpgsql switches to a cached generic plan after a few calls on the same pooled
+-- connection, where the floor is an unknown parameter: on the API that ran ~30x slower
+-- (quarter_totals: 7 s instead of 0.2 s).
+alter function quarter_totals(jsonb) set plan_cache_mode = force_custom_plan;
+alter function theme_series(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function tag_table(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function theme_games(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function theme_dist(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function theme_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function hit_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function game_neighbors(int, jsonb, jsonb) set plan_cache_mode = force_custom_plan;

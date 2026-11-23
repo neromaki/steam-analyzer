@@ -31,13 +31,30 @@ create table if not exists games (
   pct_positive      smallint not null default 0,
   rating            real,              -- SteamDB-style rating (review %, pulled toward 50% when few reviews)
   developer         text not null default '',
+  tag_ids           int[] not null default '{}',      -- Steam tagids, strongest first
+  is_adult          boolean not null default false
+);
+-- games holds only what lists and analyses scan, so it stays under a quarter of the free
+-- tier's shared buffers (~56 MB): Postgres then keeps it cached instead of re-reading it
+-- from disk on every scan. Display-only and wide columns live in game_info.
+create table if not exists game_info (
+  appid             int primary key references games (appid) on delete cascade,
   publisher         text not null default '',
   header_image      text,
   short_description text not null default '',
-  tag_ids           int[] not null default '{}',      -- Steam tagids, strongest first
-  tag_w             smallint[] not null default '{}', -- votes, 0-100 relative to the strongest tag
-  is_adult          boolean not null default false
+  tag_w             smallint[] not null default '{}'  -- votes per tag_ids entry, 0-100 relative to the strongest
 );
+-- One-off move for databases created before game_info existed (data is kept).
+do $$ begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'games' and column_name = 'short_description') then
+    insert into game_info (appid, publisher, header_image, short_description, tag_w)
+      select appid, publisher, header_image, short_description, tag_w from games
+      on conflict (appid) do nothing;
+    alter table games drop column publisher, drop column header_image,
+                      drop column short_description, drop column tag_w;
+  end if;
+end $$;
 create index if not exists games_tags_gin   on games using gin (tag_ids);
 create index if not exists games_name_trgm  on games using gin (name gin_trgm_ops);
 create index if not exists games_release_q  on games (release_q);
