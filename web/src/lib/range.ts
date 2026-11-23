@@ -35,7 +35,8 @@ export function setOverride(s: RangeState, id: string, r: Range): RangeState {
 
 export function clearOverride(s: RangeState, id: string): RangeState {
   if (!(id in s.overrides)) return s;
-  const { [id]: _drop, ...rest } = s.overrides;
+  const rest = { ...s.overrides };
+  delete rest[id];
   return { ...s, overrides: rest };
 }
 

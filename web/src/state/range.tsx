@@ -1,5 +1,6 @@
 // Date-range scoping for a page: one global range plus per-chart/table overrides, all in the URL.
 // Pages wrap their content in <RangeScope>; charts and tables call useScopedRange(id).
+/* eslint-disable react-refresh/only-export-components -- the provider and its hooks belong together */
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {

@@ -57,7 +57,7 @@ export default function SearchBar() {
     placeholderData: keepPreviousData,
     staleTime: 60 * 60 * 1000,
   });
-  const gameHits = q && games.data ? games.data : [];
+  const gameHits = useMemo(() => (q && games.data ? games.data : []), [q, games.data]);
 
   const items: Item[] = useMemo(
     () => (q ? [...tagHits.map(tag => ({ kind: 'tag', tag }) as Item), ...gameHits.map(game => ({ kind: 'game', game }) as Item), { kind: 'all' }] : []),
