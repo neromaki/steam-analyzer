@@ -1,6 +1,6 @@
 // Game page data: the game, its similar games, follower waves for trend-setters, and the
 // page's similarity/wave settings (in the URL, carried along when moving between game pages).
-import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { configured, fetchGame, gameNeighbors, gameWaves, type SimParams } from '../lib/api';
@@ -74,25 +74,33 @@ export function useNeighbors(appid: number, s: SimParams, enabled = true) {
   });
 }
 
-const CHUNK = 12;
+// Each game in a batch costs a full scan of the vectors. On the free tier's throttled CPU a
+// batch of 4 can take several seconds, so batches stay small and only two run at once to keep
+// every call well under the API's 15 s limit.
+const CHUNK = 4, PARALLEL = 2;
 
 /**
- * Follower counts (quarter → games) for a list of games, fetched 12 at a time. Returns what has
- * loaded so far and whether more is coming.
+ * Follower counts (quarter → games) for a list of games, fetched a few at a time. Returns what
+ * has loaded so far and whether more is coming.
  */
 export function useWaves(appids: number[], s: SimParams, enabled = true) {
   const [floor] = useFloor();
+  const qc = useQueryClient();
   const p = { wText: s.wText, minSim: s.minSim };
   const chunks = useMemo(() => {
     const out: number[][] = [];
     for (let i = 0; i < appids.length; i += CHUNK) out.push(appids.slice(i, i + CHUNK));
     return out;
   }, [appids.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const keys = chunks.map(ids => ['game_waves', ids.join(','), fk(p), fk(floor)]);
+  // Batch i starts once all but the last PARALLEL - 1 batches before it have settled.
+  const settled = (i: number) => { const st = qc.getQueryState(keys[i]); return !!st && (st.status !== 'pending'); };
   const qs = useQueries({
-    queries: chunks.map(ids => ({
-      queryKey: ['game_waves', ids.join(','), fk(p), fk(floor)],
+    queries: chunks.map((ids, i) => ({
+      queryKey: keys[i],
       queryFn: () => gameWaves(ids, p, floor),
-      staleTime: HOUR, gcTime: HOUR, enabled: configured && enabled,
+      staleTime: HOUR, gcTime: HOUR,
+      enabled: configured && enabled && keys.slice(0, Math.max(0, i - PARALLEL + 1)).every((_, j) => settled(j)),
     })),
   });
   const stamp = qs.map(q => q.dataUpdatedAt).join(',');
@@ -101,5 +109,5 @@ export function useWaves(appids: number[], s: SimParams, enabled = true) {
     for (const q of qs) for (const [id, c] of q.data ?? []) m.set(id, new Map(c));
     return m;
   }, [stamp]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { waves, loading: qs.some(q => q.isFetching), error: qs.find(q => q.error)?.error as Error | undefined };
+  return { waves, loading: configured && enabled && qs.some(q => q.isPending || q.isFetching), error: qs.find(q => q.error)?.error as Error | undefined };
 }
