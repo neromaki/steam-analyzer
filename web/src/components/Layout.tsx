@@ -4,6 +4,7 @@ import { useMeta } from '../lib/data';
 import { fmtDate, fmtInt } from '../lib/format';
 import { useTheme } from '../lib/theme';
 import { useLink } from '../lib/url';
+import FloorControl from './FloorControl';
 import SearchBar from './SearchBar';
 
 function Logo() {
@@ -54,6 +55,7 @@ export default function Layout() {
         <SearchBar />
         <div className="spacer" />
         <DataStamp />
+        <FloorControl />
         <ThemeToggle />
       </header>
       <main className="main" id="main">
