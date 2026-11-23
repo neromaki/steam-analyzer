@@ -1,0 +1,18 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# local data (re-created by the fetch / pipeline)
+data/
+output/
+steam_games.csv
+dashboard.html
+pipeline/out/
+
+# tooling
+__pycache__/
+*.pyc
+node_modules/
+web/dist/
+.claude/settings.local.json
