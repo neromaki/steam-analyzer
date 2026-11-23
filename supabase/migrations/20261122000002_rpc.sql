@@ -426,35 +426,82 @@ $$;
 
 -- Every game whose blended similarity to p_appid is >= minSim (and passes the floor).
 -- p = {wText: 0..1 (weight of description similarity), minSim, limit}
--- {rows: [[appid, name, release_date, release_q, coming_soon, reviews, pct_positive, developer,
---          tags[1:8], sim, tag_sim, text_sim]]}
+-- {n: matches, counts: [[release_q, n_all, n_other_developers]] (released matches),
+--  rows: [[appid, name, release_date, release_q, coming_soon, reviews, pct_positive, developer,
+--          tags[1:8], sim, tag_sim, text_sim]] (the `limit` most similar)}
+-- Two steps: one pass over the vectors alone finds the matches, then only those are looked up
+-- in games by key. (Joining first made the planner walk both tables in key order: ~2-4 s on
+-- the free tier instead of ~0.4 s.)
 create or replace function game_neighbors(p_appid int, p jsonb, f jsonb default null) returns json
 language plpgsql stable as $$
 declare fl floor_t := floor_of(f);
+  dd date := data_date();
   w real := coalesce((p->>'wText')::real, 0.3);
   ms real := coalesce((p->>'minSim')::real, 0.49);
   lim int := least(coalesce((p->>'limit')::int, 3000), 8000);
-  tv sparsevec; xv halfvec;
+  tv sparsevec; xv halfvec; dev text;
+  ids int[]; tss real[]; xss real[];
 begin
-  select tag_vec, text_vec into tv, xv from game_vec where appid = p_appid;
-  if tv is null then return json_build_object('rows', '[]'::json); end if;
+  select v.tag_vec, v.text_vec, lower(g.developer) into tv, xv, dev
+  from game_vec v join games g using (appid) where v.appid = p_appid;
+  if tv is null then return json_build_object('n', 0, 'counts', '[]'::json, 'rows', '[]'::json); end if;
+  select array_agg(appid), array_agg(ts), array_agg(xs) into ids, tss, xss
+  from (select v.appid, -(v.tag_vec <#> tv)::real as ts, -(v.text_vec <#> xv)::real as xs
+        from game_vec v where v.appid <> p_appid offset 0) s
+  where (1 - w) * ts + w * xs >= ms;
   return (
-    with s as (
-      select v.appid, -(v.tag_vec <#> tv) as ts, -(v.text_vec <#> xv) as xs
-      from game_vec v where v.appid <> p_appid
-    ),
-    r as (
+    with m as (
       select g.appid, g.name, g.release_date, g.release_q, g.coming_soon, g.reviews, g.pct_positive,
-             g.developer, g.tag_ids[1:8] as tags, (1 - w) * s.ts + w * s.xs as sim, s.ts, s.xs
-      from s join games g using (appid)
-      where (1 - w) * s.ts + w * s.xs >= ms and passes(g, fl)
-      order by sim desc
-      limit lim
-    )
-    select json_build_object('rows', coalesce(json_agg(json_build_array(
+             g.developer, g.tag_ids[1:8] as tags, (1 - w) * u.ts + w * u.xs as sim, u.ts, u.xs,
+             (not g.coming_soon and g.release_date <= dd) as rel, lower(g.developer) <> dev as other
+      from unnest(ids, tss, xss) u(appid, ts, xs) join games g using (appid)
+      where passes(g, fl)
+    ),
+    r as (select * from m order by sim desc limit lim)
+    select json_build_object(
+      'n', (select count(*) from m),
+      'counts', (select coalesce(json_agg(json_build_array(release_q, n_all, n_other) order by release_q), '[]')
+                 from (select release_q, count(*) as n_all, count(*) filter (where other) as n_other
+                       from m where rel and release_q is not null group by 1) c),
+      'rows', coalesce(json_agg(json_build_array(
         appid, name, release_date, release_q, coming_soon, reviews, pct_positive, developer, tags,
         round(sim::numeric, 4), round(ts::numeric, 4), round(xs::numeric, 4)) order by sim desc), '[]'))
     from r);
+end $$;
+
+-- Follower waves for up to 12 games at once (the game page's trend-setters): for each, how many
+-- released games by other developers match it (blended similarity >= minSim, passing the floor)
+-- per release quarter. One pass over the vectors for all of them.
+-- [[appid, [[release_q, n]]]]; a game with no matches has an empty list.
+create or replace function game_waves(p_appids int[], p jsonb, f jsonb default null) returns json
+language plpgsql stable as $$
+declare fl floor_t := floor_of(f);
+  dd date := data_date();
+  w real := coalesce((p->>'wText')::real, 0.3);
+  ms real := coalesce((p->>'minSim')::real, 0.49);
+  hs int[]; tvs sparsevec[]; xvs halfvec[]; devs text[];
+begin
+  select array_agg(v.appid), array_agg(v.tag_vec), array_agg(v.text_vec), array_agg(lower(g.developer))
+    into hs, tvs, xvs, devs
+  from game_vec v join games g using (appid) where v.appid = any(p_appids[1:12]);
+  if hs is null then return '[]'::json; end if;
+  return (
+    with m as (
+      select h.i, v.appid
+      from game_vec v cross join unnest(hs, tvs, xvs) with ordinality h(appid, tv, xv, i)
+      where v.appid <> h.appid and (1 - w) * -(v.tag_vec <#> h.tv) + w * -(v.text_vec <#> h.xv) >= ms
+      offset 0
+    ),
+    c as (
+      select m.i, g.release_q, count(*) as n
+      from m join games g using (appid)
+      where passes(g, fl) and not g.coming_soon and g.release_date <= dd and g.release_q is not null
+        and lower(g.developer) <> devs[m.i]
+      group by 1, 2
+    )
+    select json_agg(json_build_array(hs[h.i], coalesce(x.qs, '[]'::json)))
+    from generate_subscripts(hs, 1) h(i)
+    left join (select i, json_agg(json_build_array(release_q, n) order by release_q) as qs from c group by i) x using (i));
 end $$;
 
 -- ---------------------------------------------------------------- planning
@@ -470,3 +517,4 @@ alter function theme_dist(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function theme_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function hit_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function game_neighbors(int, jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function game_waves(int[], jsonb, jsonb) set plan_cache_mode = force_custom_plan;
