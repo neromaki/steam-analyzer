@@ -210,3 +210,16 @@ a.chip:hover { border-color: var(--accent); text-decoration: none; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+
+/* ------------------------------------------------------------ date ranges */
+
+.global-range, .range-control { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.range-control .range-btn { color: var(--muted); }
+.range-control.overridden .range-btn { color: var(--override); }
+.ov-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--override); display: inline-block; flex: none; }
+.range-picker { display: flex; flex-direction: column; gap: 10px; min-width: 280px; }
+.range-inputs { display: flex; gap: 10px; }
+.range-inputs label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.range-inputs .input { width: 140px; }
+.range-quick { display: flex; flex-wrap: wrap; gap: 4px; }
+.popover-title { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
