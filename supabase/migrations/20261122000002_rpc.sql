@@ -135,6 +135,7 @@ declare
   dir text := case when p->>'dir' = 'asc' then 'asc' else 'desc' end;
   cnt text := coalesce(p->>'count', 'both');
   w text := 'passes(g, $2) and in_theme(g, $3)';
+  src text := 'games g';
   ord text;
   total bigint;
   res json;
@@ -144,8 +145,9 @@ begin
   if (p->>'from') is not null then w := w || $w$ and g.release_date >= ($1->>'from')::date$w$; end if;
   if (p->>'to') is not null then w := w || $w$ and g.release_date <= ($1->>'to')::date$w$; end if;
   if (p->>'minRating') is not null then w := w || $w$ and g.rating >= ($1->>'minRating')::real$w$; end if;
-  if (p->>'priceMin') is not null then w := w || $w$ and (g.is_free and ($1->>'priceMin')::numeric <= 0 or coalesce(g.price_gbp, 0) >= ($1->>'priceMin')::numeric)$w$; end if;
-  if (p->>'priceMax') is not null then w := w || $w$ and (g.is_free or coalesce(g.price_gbp, 0) <= ($1->>'priceMax')::numeric)$w$; end if;
+  -- Price filters skip coming-soon games with no price yet (like the floor's price rule).
+  if (p->>'priceMin') is not null then w := w || $w$ and ((g.coming_soon and g.price_gbp is null and not g.is_free) or coalesce(g.price_gbp, 0) >= ($1->>'priceMin')::numeric)$w$; end if;
+  if (p->>'priceMax') is not null then w := w || $w$ and (g.is_free or g.price_gbp is null or g.price_gbp <= ($1->>'priceMax')::numeric)$w$; end if;
   if (p->>'revMin') is not null then w := w || $w$ and g.reviews >= ($1->>'revMin')::int$w$; end if;
   if (p->>'revMax') is not null then w := w || $w$ and g.reviews <= ($1->>'revMax')::int$w$; end if;
 
@@ -154,6 +156,13 @@ begin
   end if;
   if cnt = 'only' then return json_build_object('total', total); end if;
 
+  -- Coming-soon games have no reviews or rating, so they sit at the far end of those indexes:
+  -- walking an index to find them reads every released game first. Collect the (at most
+  -- ~60k) upcoming matches, then sort them.
+  if p->>'status' = 'upcoming' then
+    src := '(select * from games g where ' || w || ' offset 0) g';
+    w := 'true';
+  end if;
   ord := case coalesce(p->>'sort', 'reviews')
     when 'name' then format('name %s, appid', dir)
     when 'rating' then format('rating %s nulls last, reviews desc, appid', dir)
@@ -165,7 +174,7 @@ begin
                                               developer, header_image, tags) order by %1$s), '[]')
     from (select g.appid, g.name, g.release_date, g.coming_soon, g.early_access, g.is_free, g.price_gbp,
                  g.reviews, g.pct_positive, g.rating, g.developer, g.header_image, g.tag_ids[1:6] as tags
-          from games g where %2$s order by %1$s limit %3$s offset %4$s) s $q$, ord, w, lim, off)
+          from %2$s where %3$s order by %1$s limit %4$s offset %5$s) s $q$, ord, src, w, lim, off)
     into res using p, fl, th;
   return json_build_object('total', total, 'rows', res);
 end $$;
