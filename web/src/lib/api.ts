@@ -63,13 +63,14 @@ export interface GameQuery extends Theme {
   sort?: 'reviews' | 'rating' | 'released' | 'name';
   dir?: 'asc' | 'desc';
   limit?: number; offset?: number;
+  count?: 'both' | 'none' | 'only';     // rows and total, rows only, or total only
 }
 // [appid, name, release_date, coming_soon, early_access, is_free, price_gbp, reviews, pct_positive,
 //  rating, developer, header_image, tags[1:6]]
 export type GameRow = [number, string, string | null, boolean, boolean, boolean, number | null, number, number,
   number | null, string, string | null, number[]];
 export const searchGames = (p: GameQuery, f: Floor) =>
-  rpc<{ total: number; rows: GameRow[] }>('search_games', { p, f });
+  rpc<{ total: number | null; rows?: GameRow[] }>('search_games', { p, f });
 
 // ---------------------------------------------------------------- theme analysis
 

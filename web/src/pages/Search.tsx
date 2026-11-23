@@ -1,10 +1,11 @@
 // Search results: Games and Tags tabs. The header (query, tags, date range) stays put while the
-// results below scroll on their own. Tab contents arrive in milestones 3 (Games) and 4 (Tags).
+// results below scroll on their own. The Tags tab's analysis arrives in milestone 4.
 import { useSearchParams } from 'react-router-dom';
 import { GlobalRangeBar, RangeControl } from '../components/RangeControls';
 import { useTags } from '../lib/data';
 import { idsParam, setIds, useUpdateParams } from '../lib/url';
 import { RangeScope } from '../state/range';
+import GamesTab from './GamesTab';
 
 type Tab = 'games' | 'tags';
 
@@ -45,16 +46,9 @@ export default function Search() {
           </div>
           <GlobalRangeBar />
         </div>
-        <div className="results-body">
+        <div className={`results-body${tab === 'games' ? ' fill' : ''}`}>
           {tab === 'games' ? (
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Games</h2>
-                <div className="spacer" />
-                <RangeControl id="games" />
-              </div>
-              <div className="empty">The games table arrives in the next milestone.</div>
-            </section>
+            <GamesTab />
           ) : (
             <>
               <section className="panel">

@@ -294,3 +294,74 @@ kbd {
 }
 .tabs button:hover { color: var(--text); background: var(--panel-2); }
 .tabs button[aria-selected='true'] { color: var(--accent-strong); background: var(--accent-bg); border-color: var(--accent); }
+
+/* ------------------------------------------------------------ games tab */
+
+.results-body.fill { overflow: hidden; }
+.games-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; flex: 1; min-height: 0; }
+
+.gf-panel { overflow: auto; min-height: 0; }
+.gf { display: flex; flex-direction: column; gap: 14px; padding: 12px; }
+.gf-head { display: flex; align-items: center; justify-content: space-between; min-height: 22px; }
+.gf .field { gap: 5px; }
+.gf .seg { align-self: flex-start; }
+.gf .seg button { padding: 0 8px; font-size: 12px; }
+.gf .input[type='search'] { width: 100%; }
+.gf .num-input { width: 72px; }
+.gf .tag-picker-input .input { width: 100%; }
+.gf-value { float: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.gf-slider { width: 100%; accent-color: var(--accent); margin: 2px 0; }
+.gf-toggle { display: none; }
+
+.gt-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.gt-count { font-variant-numeric: tabular-nums; }
+.gt { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.gt-scroll { flex: 1; overflow: auto; min-height: 0; contain: strict; }
+.gt.stale .gt-body { opacity: 0.55; transition: opacity 0.15s 0.1s; }
+.gt-row {
+  --cols: 88px minmax(200px, 2.2fr) minmax(170px, 2fr) 104px 64px 78px 66px;
+  display: grid; grid-template-columns: var(--cols); align-items: center; column-gap: 10px;
+  padding: 0 12px; border-bottom: 1px solid var(--border);
+}
+.gt-body { position: relative; }
+.gt-body .gt-row { position: absolute; top: 0; left: 0; right: 0; }
+.gt-body .gt-row:hover { background: var(--panel-2); }
+.gt-head {
+  position: sticky; top: 0; z-index: 2; height: 32px;
+  background: var(--panel); font-size: 12px; color: var(--muted); font-weight: 600;
+}
+.gt-head .num { text-align: right; }
+.gt-sort { border: 0; background: none; padding: 0; cursor: pointer; color: inherit; font-weight: inherit; white-space: nowrap; }
+.gt-sort:hover, .gt-sort.on { color: var(--accent-strong); }
+.gt-arrow { display: inline-block; width: 1em; font-size: 9px; text-align: center; }
+.gt-head .num .gt-sort { flex-direction: row-reverse; }
+.gt-img img, .gt-noimg { display: block; width: 80px; height: 37px; border-radius: 2px; object-fit: cover; background: var(--panel-3); }
+.gt-name { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.gt-title { color: var(--text-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gt-sub { display: flex; gap: 6px; align-items: center; font-size: 12px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.gt-sub .faint { overflow: hidden; text-overflow: ellipsis; }
+.badge { flex: none; font-size: 10px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border-strong); color: var(--muted); line-height: 15px; }
+.gt-tags { display: flex; gap: 4px; overflow: hidden; min-width: 0; }
+.gt-tag {
+  flex: none; height: 20px; padding: 0 7px; font-size: 11px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); cursor: pointer; white-space: nowrap;
+}
+button.gt-tag:hover { color: var(--text); border-color: var(--accent); }
+.gt-tag.on { color: var(--accent-strong); background: var(--accent-bg); border-color: var(--accent); cursor: default; display: inline-flex; align-items: center; }
+.gt-skel { grid-column: 1 / -1; height: 14px; border-radius: 3px; background: var(--panel-2); }
+.gt-row .num { white-space: nowrap; }
+
+@media (max-width: 1100px) {
+  .gt-row { --cols: 88px minmax(180px, 1fr) 104px 64px 78px 66px; }
+  .gt-tags { display: none; }
+}
+@media (max-width: 720px) {
+  .results-body.fill { padding: 8px; }
+  .games-layout { display: flex; flex-direction: column; gap: 8px; }
+  .gt-panel { flex: 1; }
+  .gf-panel { display: none; flex: none; max-height: 55vh; }
+  .filters-open .gf-panel { display: block; }
+  .gf-toggle { display: inline-flex; }
+  .gt-row { --cols: minmax(0, 1fr) 84px 60px; column-gap: 8px; padding: 0 8px; }
+  .gt-img, .gt-row > :nth-child(5), .gt-row > :nth-child(6) { display: none; }
+}
