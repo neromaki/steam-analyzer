@@ -16,7 +16,7 @@ import { useAllTagTable, useLeaderboard, useSoonRadar, useTagQuarters } from '..
 import { RangeScope } from '../state/range';
 import { useAxis, useQuarterTotals } from '../state/theme';
 
-function Tiles({ ytdLabel, cy }: { ytdLabel: string; cy: number }) {
+function Tiles({ ytdLabel, cy, graceHit, graceDays }: { ytdLabel: string; cy: number; graceHit: boolean; graceDays: number }) {
   const meta = useMeta();
   const table = useAllTagTable();
   const radar = useSoonRadar(365);
@@ -25,7 +25,10 @@ function Tiles({ ytdLabel, cy }: { ytdLabel: string; cy: number }) {
   const tiles: [string, ReactNode, ReactNode][] = [
     ['Games in the data', meta.data ? fmtInt(meta.data.n_games) : '…', meta.data ? `Steam data up to ${fmtDate(meta.data.fetched_to)}` : ''],
     [`Released in ${cy} so far`, g ? fmtInt(g.n_ytd) : '…',
-      g ? <>{fmtInt(g.n_prev_ytd)} by {ytdLabel} {cy - 1}{pct != null && <> (<span className={pct >= 0 ? 'up' : 'down'}>{pct >= 0 ? '+' : '−'}{Math.abs(pct).toFixed(0)}%</span>)</>}</> : ''],
+      // While the floor's grace period lets this year's newest games skip the review minimum, a % change
+      // against last year (whose games have had time to collect reviews) would mostly measure that.
+      g ? <>{fmtInt(g.n_prev_ytd)} by {ytdLabel} {cy - 1}{graceHit ? `; includes the last ${graceDays} days’ games, which skip the review minimum`
+        : pct != null && <> (<span className={pct >= 0 ? 'up' : 'down'}>{pct >= 0 ? '+' : '−'}{Math.abs(pct).toFixed(0)}%</span>)</>}</> : ''],
     ['Coming soon', g ? fmtInt(g.n_soon) : '…', radar.data ? `${fmtInt(radar.data.n_soon)} dated in the next 12 months` : ''],
   ];
   return (
@@ -66,7 +69,7 @@ function HomeBody() {
         </div>
         <GlobalRangeBar />
       </div>
-      <Tiles ytdLabel={ytdLabel} cy={cy} />
+      <Tiles ytdLabel={ytdLabel} cy={cy} graceHit={gq != null && qYear(gq) <= cy} graceDays={floor.graceDays} />
       <Volume totals={totals} dataQ={dataQ} firstQ={firstQ} gq={gq} ytdLabel={ytdLabel} graceDays={floor.graceDays} />
       <div className="tags-grid even">
         <RisingTags tq={tq} table={table} endQ={endQ} cy={cy} ytdLabel={ytdLabel} />

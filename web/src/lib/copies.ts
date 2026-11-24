@@ -24,6 +24,7 @@ export interface CopyRow {
   n: number;           // copies released since the rise (scaled if sampled)
   soon: number;        // coming-soon copies (scaled)
   copies: [number, number][]; // [appid, reviews] of sampled copies, most reviewed first
+                              // (by: 'soon': coming-soon copies as [appid, similarity], most similar first)
 }
 
 export interface CopyResult { rows: CopyRow[]; nNew: number; nSoon: number; nCand: number; sampled: boolean }
@@ -93,7 +94,7 @@ export function copyAnalysis(inp: CopyInput): CopyResult {
         s = (1 - w) * s + w * d;
       }
       if (s < inp.minSim || devs[c] === dev) continue;
-      if (isSoon) { soon[c]++; if (inp.by === 'soon') copies[c].push([g[0], g[3]]); }
+      if (isSoon) { soon[c]++; if (inp.by === 'soon') copies[c].push([g[0], s]); }
       else if (q > candQ[c]) copies[c].push([g[0], g[3]]);
     }
   }
