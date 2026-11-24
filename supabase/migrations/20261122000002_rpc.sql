@@ -515,6 +515,92 @@ begin
     from r);
 end $$;
 
+-- A lens: games similar to a set of example games instead of one. The anchor (p_appid) and
+-- p.like are the examples; p.not are counter-examples.
+--   tag weight = mean weight across the examples x share of examples with the tag (tags they
+--                all share count most) - half the counter-examples' mean weight (floored at 0),
+--                x any factor in p.tw ({tagid: factor}), then unit length
+--   text       = the examples' mean description vector
+-- p = {like: [appid], not: [appid], tw: {tagid: factor}, wText, minSim, limit}. Without minSim
+-- the cut-off is set just low enough to take in every example (0.35-0.6).
+-- Returns game_neighbors' {n, counts, rows} (other developers = not the anchor's) plus
+-- {minSim (used), lens: [[tagid, weight, weight_before_counter_examples, n_examples_with_it, factor]],
+--  examples: [[appid, sim, tag_sim, text_sim]] for every example and counter-example}.
+create or replace function lens_neighbors(p_appid int, p jsonb, f jsonb default null) returns json
+language plpgsql stable as $$
+declare fl floor_t := floor_of(f);
+  dd date := data_date();
+  w real := coalesce((p->>'wText')::real, 0.3);
+  ms real := (p->>'minSim')::real;
+  lim int := least(coalesce((p->>'limit')::int, 3000), 8000);
+  pos int[]; neg int[]; np int; nn int;
+  tv sparsevec; xv halfvec; dev text; lens json; ex json; lo real;
+  ids int[]; tss real[]; xss real[];
+begin
+  select lower(g.developer) into dev from games g join game_vec v using (appid) where g.appid = p_appid;
+  if not found then return json_build_object('n', 0, 'counts', '[]'::json, 'rows', '[]'::json); end if;
+  pos := array(select x from (select p_appid as x union select e::int from jsonb_array_elements_text(coalesce(p->'like', '[]')) e) s
+               where exists (select 1 from game_vec v where v.appid = s.x));
+  neg := array(select e::int from jsonb_array_elements_text(coalesce(p->'not', '[]')) e
+               where exists (select 1 from game_vec v where v.appid = e::int) except select unnest(pos));
+  np := cardinality(pos); nn := cardinality(neg);
+
+  with d as (
+    select u.i, sum(u.x) as sx, count(*) filter (where u.x > 0) as k
+    from game_vec v, unnest(v.tag_vec::vector::real[]) with ordinality u(x, i)
+    where v.appid = any(pos) group by u.i
+  ), nd as (
+    select u.i, sum(u.x) as sx
+    from game_vec v, unnest(v.tag_vec::vector::real[]) with ordinality u(x, i)
+    where v.appid = any(neg) group by u.i
+  ), tw as (
+    select t.ix as i, e.value::real as fct from jsonb_each_text(coalesce(p->'tw', '{}')) e join tags t on t.id = e.key::int
+  ), q as (
+    select d.i, d.k, tw.fct, (d.sx / np) * (d.k::real / np) as raw,
+           greatest((d.sx / np) * (d.k::real / np) - 0.5 * coalesce(nd.sx / nullif(nn, 0), 0), 0) * coalesce(tw.fct, 1) as q
+    from d left join nd using (i) left join tw using (i)
+  ), nrm as (select sqrt(sum(q.q * q.q)) as n from q)
+  select (select l2_normalize(array_agg(q.q order by q.i)::vector)::sparsevec from q),
+         (select coalesce(json_agg(json_build_array(t.id, round((x.q / nullif(nrm.n, 0))::numeric, 4), round(x.raw::numeric, 4), x.k, x.fct)
+                                   order by x.raw desc), '[]')
+          from (select * from q where q.raw > 0 or q.fct is not null order by q.raw desc limit 40) x join tags t on t.ix = x.i, nrm)
+  into tv, lens;
+  select l2_normalize(avg(v.text_vec::vector))::halfvec into xv from game_vec v where v.appid = any(pos);
+
+  select json_agg(json_build_array(e.appid, round(((1 - w) * e.ts + w * e.xs)::numeric, 4), round(e.ts::numeric, 4), round(e.xs::numeric, 4))),
+         min((1 - w) * e.ts + w * e.xs) filter (where e.appid = any(pos))
+  into ex, lo
+  from (select v.appid, -(v.tag_vec <#> tv)::real as ts, -(v.text_vec <#> xv)::real as xs
+        from game_vec v where v.appid = any(pos || neg)) e;
+  if ms is null then ms := greatest(0.35, least(0.6, floor(coalesce(lo, 0.49) * 100) / 100)); end if;
+
+  select array_agg(appid), array_agg(ts), array_agg(xs) into ids, tss, xss
+  from (select v.appid, -(v.tag_vec <#> tv)::real as ts, -(v.text_vec <#> xv)::real as xs
+        from game_vec v where v.appid <> p_appid offset 0) s
+  where (1 - w) * ts + w * xs >= ms;
+  return (
+    with m as (
+      select g.appid, g.name, g.release_date, g.release_q, g.coming_soon, g.reviews, g.pct_positive,
+             g.developer, g.tag_ids[1:8] as tags, (1 - w) * u.ts + w * u.xs as sim, u.ts, u.xs,
+             (not g.coming_soon and g.release_date <= dd) as rel, lower(g.developer) <> dev as other
+      from unnest(ids, tss, xss) u(appid, ts, xs) join games g using (appid)
+      where passes(g, fl)
+    ),
+    r as (select * from m order by sim desc limit lim)
+    select json_build_object(
+      'n', (select count(*) from m),
+      'minSim', round(ms::numeric, 2),
+      'lens', lens,
+      'examples', coalesce(ex, '[]'),
+      'counts', (select coalesce(json_agg(json_build_array(release_q, n_all, n_other) order by release_q), '[]')
+                 from (select release_q, count(*) as n_all, count(*) filter (where other) as n_other
+                       from m where rel and release_q is not null group by 1) c),
+      'rows', coalesce(json_agg(json_build_array(
+        appid, name, release_date, release_q, coming_soon, reviews, pct_positive, developer, tags,
+        round(sim::numeric, 4), round(ts::numeric, 4), round(xs::numeric, 4)) order by sim desc), '[]'))
+    from r);
+end $$;
+
 -- Follower waves for up to 12 games at once (the game page's trend-setters): for each, how many
 -- released games by other developers match it (blended similarity >= minSim, passing the floor)
 -- per release quarter. One pass over the vectors for all of them.
@@ -563,6 +649,7 @@ alter function theme_dist(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function theme_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function hit_vectors(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function game_neighbors(int, jsonb, jsonb) set plan_cache_mode = force_custom_plan;
+alter function lens_neighbors(int, jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function game_waves(int[], jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function tag_quarters(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
 alter function soon_radar(jsonb, jsonb) set plan_cache_mode = force_custom_plan;
