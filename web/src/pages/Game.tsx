@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import GameControls from '../components/game/GameControls';
 import Influence from '../components/game/Influence';
+import LensPanel from '../components/game/LensPanel';
 import Lineage from '../components/game/Lineage';
 import LookAlikes from '../components/game/LookAlikes';
 import GameSetters from '../components/game/GameSetters';
@@ -17,9 +18,10 @@ import type { Game } from '../lib/api';
 import { useMeta, useTags } from '../lib/data';
 import { fmtDate, fmtInt, fmtPrice, ratingTone, steamUrl } from '../lib/format';
 import { clusterTakeoff, countsMap, totalsByQ, verdict, wave, type Nb } from '../lib/lineage';
+import { isActive } from '../lib/lens';
 import { dateToQ } from '../lib/trends';
 import { useLink } from '../lib/url';
-import { useGame, useGameSettings, useNeighbors } from '../state/game';
+import { useGame, useGameSettings, useLens, useNeighbors } from '../state/game';
 import { RangeScope } from '../state/range';
 import { useAxis, useQuarterTotals } from '../state/theme';
 
@@ -72,11 +74,17 @@ function Header({ g }: { g: Game }) {
 }
 
 function Tools({ g }: { g: Game }) {
-  const s = useGameSettings();
+  const s0 = useGameSettings();
   const meta = useMeta();
   const { dataQ, firstQ } = useAxis();
   const totals = useQuarterTotals();
-  const nb = useNeighbors(g.appid, s);
+  const [lens, setLens] = useLens();
+  const nb = useNeighbors(g.appid, s0, lens);
+  const info = nb.data?.lens;
+  const lensOn = isActive(lens);
+  // With examples and no similarity in the URL, the lens picks its own cut-off: show and use that one.
+  const s = useMemo(() => (info && !s0.simSet && lens.like.length ? { ...s0, minSim: info.minSim } : s0), [s0, info, lens.like.length]);
+  const examples = useMemo(() => new Set(lensOn ? lens.like : []), [lensOn, lens.like]);
   const [why, setWhy] = useState<Nb | null>(null);
   const self = useMemo(() => selfNb(g), [g]);
   const dataDate = meta.data?.fetched_to ?? '9999-12-31';
@@ -95,15 +103,16 @@ function Tools({ g }: { g: Game }) {
         <GameControls s={s} />
         <GlobalRangeBar />
       </div>
-      <Summary nb={nb} self={self} w={w} tq={tq} verdict={v} released={hq != null} dataDate={dataDate} s={s} />
-      <Lineage nb={nb} self={self} dataDate={dataDate} onPick={setWhy} />
+      <LensPanel anchor={g.appid} name={g.name} lens={lens} setLens={setLens} nb={nb} />
+      <Summary nb={nb} self={self} w={w} tq={tq} verdict={v} released={hq != null} dataDate={dataDate} s={s} lens={lensOn} />
+      <Lineage nb={nb} self={self} dataDate={dataDate} onPick={setWhy} examples={examples} lens={lensOn} />
       <div className="tags-grid even">
-        <WaveChart w={w} nb={nb} self={self} tq={tq} s={s} />
-        <GameSetters nb={nb} self={self} selfWave={w} tq={tq} s={s} tot={tot} dataDate={dataDate} onPick={setWhy} />
+        <WaveChart w={w} nb={nb} self={self} tq={tq} s={s} lens={lensOn} />
+        <GameSetters nb={nb} self={self} selfWave={w} tq={tq} s={s} tot={tot} dataDate={dataDate} onPick={setWhy} lens={lensOn} />
       </div>
-      <LookAlikes nb={nb} self={self} dataDate={dataDate} onPick={setWhy} />
-      <Influence nb={nb} self={self} s={s} dataDate={dataDate} />
-      {why && <WhySimilar a={g} b={why} wText={s.wText} onClose={() => setWhy(null)} />}
+      <LookAlikes nb={nb} self={self} dataDate={dataDate} onPick={setWhy} lens={lens} setLens={setLens} />
+      <Influence nb={nb} self={self} s={s} dataDate={dataDate} lensKey={lensOn ? JSON.stringify([lens.like, lens.not, [...lens.tw]]) : ''} />
+      {why && <WhySimilar a={g} b={why} wText={s.wText} lens={lensOn ? info?.tags : undefined} onClose={() => setWhy(null)} />}
     </>
   );
 }

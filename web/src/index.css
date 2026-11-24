@@ -511,7 +511,24 @@ button.gt-tag:hover { color: var(--text); border-color: var(--accent); }
 .yr-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; }
 .yr-legend i { display: inline-block; width: 120px; height: 8px; border-radius: 4px; }
 
+/* Lens: example games, counter-examples and the tag weights they produce. */
+.lens-rows { display: grid; gap: 8px; }
+.lens-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 24px; }
+.lens-label { width: 84px; flex: none; font-size: 12px; }
+.lens-anchor { border-color: var(--accent); background: var(--accent-bg); }
+.chip a { color: inherit; }
+.game-picker .input { width: 200px; height: 24px; }
+.lens-tag { cursor: pointer; font: inherit; font-size: 12px; }
+.lens-tag:hover { border-color: var(--accent); }
+.lens-tag.off { color: var(--faint); text-decoration: line-through; }
+.lens-tag.set { border-color: var(--accent); }
+.lens-panel .tsec-body > p { margin: 8px 0 0; }
+.btn.tiny { height: 20px; min-width: 22px; padding: 0 5px; font-size: 13px; justify-content: center; }
+.lens-act { white-space: nowrap; }
+
 @media (max-width: 720px) {
+  .lens-label { width: 100%; }
+  .game-picker, .game-picker .input { width: 100%; }
   .game-bar { position: static; }
   .game-bar .global-range { margin-left: 0; }
   .why-only { grid-template-columns: minmax(0, 1fr); }
