@@ -2,9 +2,10 @@
 // by how many of the search's games released since then closely match them. A hit needn't
 // carry the search's own tags: Balatro isn't tagged Poker, but many recent Poker games copy it.
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { configured, fetchGameNames, type Theme } from '../../lib/api';
-import type { CopyInput, CopyResult } from '../../lib/copies';
+import type { CopyInput } from '../../lib/copies';
+import { useCopyWorker } from '../../hooks/useCopyWorker';
 import { useTags } from '../../lib/data';
 import { fmtDate, fmtInt } from '../../lib/format';
 import { qLabel } from '../../lib/trends';
@@ -14,28 +15,6 @@ import { useHitVectors, useThemeVectors } from '../../state/theme';
 import { GameLink, ParamSlider as Slider, Section, TagNames, useInView } from './common';
 
 const LOOKBACK = 12, CAND_REVIEWS = 1000;
-
-/** Run the analysis in a worker; the latest request wins. */
-function useCopyWorker(input: CopyInput | null) {
-  const worker = useRef<Worker | null>(null);
-  const seq = useRef(0);
-  const [out, setOut] = useState<{ result: CopyResult; ms: number; id: number } | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    worker.current = new Worker(new URL('../../lib/copies.worker.ts', import.meta.url), { type: 'module' });
-    worker.current.onmessage = (e: MessageEvent<{ id: number; result: CopyResult; ms: number }>) => {
-      if (e.data.id === seq.current) { setOut(e.data); setBusy(false); }
-    };
-    return () => worker.current?.terminate();
-  }, []);
-  useEffect(() => {
-    if (!input || !worker.current) return;
-    const id = ++seq.current;
-    setBusy(true);
-    worker.current.postMessage({ id, input });
-  }, [input]);
-  return { out, busy };
-}
 
 export default function Copies({ theme, tq, dataQ, firstQ, wDefault, sDefault }: {
   theme: Theme; tq: number | null; dataQ: number; firstQ: number; wDefault: number; sDefault: number;

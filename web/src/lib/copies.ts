@@ -15,6 +15,7 @@ export interface CopyInput {
   wText: number;       // weight of description similarity (0 = tags only)
   minSim: number;
   withAdult: boolean;  // allow adult games as hits
+  by?: 'new' | 'soon'; // rank by released copies (default) or coming-soon ones
 }
 
 export interface CopyRow {
@@ -92,7 +93,7 @@ export function copyAnalysis(inp: CopyInput): CopyResult {
         s = (1 - w) * s + w * d;
       }
       if (s < inp.minSim || devs[c] === dev) continue;
-      if (isSoon) soon[c]++;
+      if (isSoon) { soon[c]++; if (inp.by === 'soon') copies[c].push([g[0], g[3]]); }
       else if (q > candQ[c]) copies[c].push([g[0], g[3]]);
     }
   }
@@ -102,6 +103,9 @@ export function copyAnalysis(inp: CopyInput): CopyResult {
     tags: c[5].slice(0, 6),
     n: Math.round(copies[i].length * scaleN), soon: Math.round(soon[i] * scaleS),
     copies: copies[i].sort((a, b) => b[1] - a[1]),
-  })).filter(r => r.n > 0).sort((a, b) => b.n - a.n || b.reviews - a.reviews);
-  return { rows, nNew: inp.nNew, nSoon: inp.nSoon, nCand: C, sampled: nNewS < inp.nNew || nSoonS < inp.nSoon };
+  }));
+  const ranked = inp.by === 'soon'
+    ? rows.filter(r => r.soon > 0).sort((a, b) => b.soon - a.soon || b.reviews - a.reviews)
+    : rows.filter(r => r.n > 0).sort((a, b) => b.n - a.n || b.reviews - a.reviews);
+  return { rows: ranked, nNew: inp.nNew, nSoon: inp.nSoon, nCand: C, sampled: nNewS < inp.nNew || nSoonS < inp.nSoon };
 }
