@@ -100,9 +100,9 @@ export type VecRow = [number, number | null, boolean, number, string, number[], 
 // VecRow + [name, release_date, pct_positive]
 export type CandRow = [...VecRow, string, string, number];
 /** The theme's games released since riseQ (sampled to maxNew) and coming soon. */
-export const themeVectors = (p: Theme & { riseQ: number; maxNew?: number }, f: Floor) =>
+export const themeVectors = (p: Theme & { riseQ: number; maxNew?: number; soonWithin?: number }, f: Floor) =>
   rpc<{ n_new: number; n_soon: number; new: VecRow[] }>('theme_vectors', { p, f });
-/** Candidate hits from the years before riseQ: the same for every theme, so cache per quarter. */
+/** Candidate hits from `lookback` quarters before riseQ to 2 after: the same for every theme, so cache per quarter. */
 export const hitVectors = (p: { riseQ: number; lookback?: number; minReviews?: number }, f: Floor) =>
   rpc<{ cand: CandRow[] }>('hit_vectors', { p, f });
 
@@ -146,3 +146,25 @@ export async function fetchGameNames(appids: number[]): Promise<Map<number, { na
   if (error) throw new Error(error.message);
   return new Map((data as { appid: number; name: string; release_date: string | null; reviews: number }[]).map(r => [r.appid, r]));
 }
+
+/** Basics for a list of games (the leaderboard holds ids only). */
+export interface GameBasic { appid: number; name: string; release_date: string | null; release_q: number | null; reviews: number;
+  pct_positive: number; developer: string; tag_ids: number[] }
+export async function fetchGamesBasic(appids: number[]): Promise<Map<number, GameBasic>> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  if (!appids.length) return new Map();
+  const { data, error } = await supabase.from('games')
+    .select('appid,name,release_date,release_q,reviews,pct_positive,developer,tag_ids').in('appid', appids);
+  if (error) throw new Error(error.message);
+  return new Map((data as GameBasic[]).map(r => [r.appid, r]));
+}
+
+// ---------------------------------------------------------------- home page
+
+/** Released games per tag per quarter for the last `quarters` quarters (the latest partial). */
+export const tagQuarters = (p: { quarters?: number }, f: Floor) =>
+  rpc<{ q0: number; lq: number; totals: number[]; rows: [number, number, number][] }>('tag_quarters', { p, f });
+
+/** Tags of coming-soon games (dated within `within` days, or all) vs the last 12 months' releases. */
+export const soonRadar = (p: { within?: number }, f: Floor) =>
+  rpc<{ n_soon: number; n_recent: number; rows: [number, number, number][] }>('soon_radar', { p, f });

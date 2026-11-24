@@ -517,3 +517,16 @@ button.gt-tag:hover { color: var(--text); border-color: var(--accent); }
   .why-only { grid-template-columns: minmax(0, 1fr); }
   .why-score b { font-size: 16px; }
 }
+
+/* ---------------------------------------------------------------- home page */
+.home-page { display: flex; flex-direction: column; gap: 12px; }
+.home-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 24px; }
+.home-head > div:first-child { flex: 1 1 420px; }
+.home-head h1 { margin: 0 0 4px; }
+.home-head p { margin: 0; }
+.gc-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.gc-inline select { height: 26px; }
+.spark { display: block; color: var(--accent); }
+.spark polyline { stroke: currentColor; }
+.spark-mark { stroke: var(--faint); stroke-width: 1; stroke-dasharray: 2 2; }
+.soon-eg span + span::before { content: ' · '; color: var(--faint); }
