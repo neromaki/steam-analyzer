@@ -15,8 +15,8 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 const MINREV = { any: 0, '100': 100, '1k': 1000 } as const;
 type MinRev = keyof typeof MINREV;
 
-export default function Lineage({ nb, self, dataDate, onPick }: {
-  nb: UseQueryResult<Neighbors>; self: Nb; dataDate: string; onPick: (g: Nb) => void;
+export default function Lineage({ nb, self, dataDate, onPick, examples, lens }: {
+  nb: UseQueryResult<Neighbors>; self: Nb; dataDate: string; onPick: (g: Nb) => void; examples: Set<number>; lens: boolean;
 }) {
   const c = useChartColors();
   const { range } = useScopedRange('lineage');
@@ -24,19 +24,21 @@ export default function Lineage({ nb, self, dataDate, onPick }: {
   const soonX = Date.parse(dataDate) + 180 * DAY;
 
   const groups = useMemo(() => {
-    const rows = (nb.data?.rows ?? []).filter(g => g.reviews >= MINREV[mr] || !isReleased(g, dataDate));
+    const all = nb.data?.rows ?? [];
+    const rows = all.filter(g => !examples.has(g.appid) && (g.reviews >= MINREV[mr] || !isReleased(g, dataDate)));
     const rel = rows.filter(g => isReleased(g, dataDate) && inMonths(g.date, range));
     const showSoon = !range.to;
     return {
       before: rel.filter(g => self.date && g.date! < self.date),
       after: rel.filter(g => !self.date || g.date! >= self.date),
       soon: showSoon ? rows.filter(g => !isReleased(g, dataDate)) : [],
+      ex: all.filter(g => examples.has(g.appid) && (isReleased(g, dataDate) ? inMonths(g.date, range) : showSoon)),
     };
-  }, [nb.data, mr, range, dataDate, self.date]);
+  }, [nb.data, mr, range, dataDate, self.date, examples]);
 
   const option = useMemo<EOption>(() => {
     const b = baseOption(c);
-    const all = [...groups.before, ...groups.after, ...groups.soon];
+    const all = [...groups.before, ...groups.after, ...groups.soon, ...groups.ex];
     const maxRev = Math.max(1, ...all.map(g => g.reviews));
     const size = (rev: number) => 7 + 25 * Math.sqrt(rev / maxRev);
     // Coming-soon games spread across the band so they don't stack on one line.
@@ -52,6 +54,7 @@ export default function Lineage({ nb, self, dataDate, onPick }: {
       ser('After it', groups.after, c.series[1]),
       ser('Coming soon', groups.soon, c.series[2]),
     ];
+    if (groups.ex.length) series.push({ ...ser('Your examples', groups.ex, c.series[3]), symbol: 'diamond', z: 3 });
     series[0].markLine = {
       symbol: 'none', silent: true, lineStyle: { color: c.strong, width: 1.5 },
       label: { formatter: 'This game', color: c.strong, fontSize: 11, position: 'end' }, data: [{ xAxis: selfX }],
@@ -82,13 +85,14 @@ export default function Lineage({ nb, self, dataDate, onPick }: {
     };
   }, [groups, c, self, dataDate, soonX, range.from]);
 
-  const n = groups.before.length + groups.after.length + groups.soon.length;
-  const tableRows = useMemo(() => [...groups.before, ...groups.after].sort((a, b) => (a.date! < b.date! ? -1 : 1)).concat(groups.soon), [groups]);
+  const n = groups.before.length + groups.after.length + groups.soon.length + groups.ex.length;
+  const tableRows = useMemo(() => [...groups.before, ...groups.after, ...groups.ex.filter(g => isReleased(g, dataDate))]
+    .sort((a, b) => (a.date! < b.date! ? -1 : 1)).concat(groups.soon, groups.ex.filter(g => !isReleased(g, dataDate))), [groups, dataDate]);
 
   return (
     <Section title="Lineage" rangeId="lineage"
       controls={<Seg label="Minimum reviews" value={mr} onChange={setMr} options={[['any', 'All'], ['100', '100+ reviews'], ['1k', '1,000+']]} />}
-      sub={<>Every similar game by release date: before this game on the left, after it on the right, coming soon at the edge.
+      sub={<>Every {lens ? 'game matching the lens' : 'similar game'} by release date: before this game on the left, after it on the right, coming soon at the edge.{lens ? ' Diamonds are your examples.' : ''}{' '}
         Height is how similar it is; dot size is reviews. Click a dot to see why it’s similar.</>}>
       <QueryState q={nb} height={340}>
         {n ? (

@@ -11,8 +11,8 @@ import { useScopedRange } from '../../state/range';
 import EChart, { baseOption, useChartColors, type EOption } from '../EChart';
 import { ChartOrTable, QueryState, Section } from '../tags/common';
 
-export default function WaveChart({ w, nb, self, tq, s }: {
-  w: Wave | null; nb: UseQueryResult<Neighbors>; self: Nb; tq: number | null; s: GameSettings;
+export default function WaveChart({ w, nb, self, tq, s, lens }: {
+  w: Wave | null; nb: UseQueryResult<Neighbors>; self: Nb; tq: number | null; s: GameSettings; lens: boolean;
 }) {
   const c = useChartColors();
   const { range } = useScopedRange('wave');
@@ -40,7 +40,9 @@ export default function WaveChart({ w, nb, self, tq, s }: {
       lines.push({ xAxis: qLabel(w.hq), label: { formatter: 'Release', color: c.strong }, lineStyle: { color: c.strong, type: 'solid', width: 1.5 } });
     }
     if (tq != null && tq >= view.keys[0] && tq <= view.keys[view.keys.length - 1]) {
-      lines.push({ xAxis: qLabel(tq), label: { formatter: 'Cluster take-off', color: c.muted }, lineStyle: { color: c.muted, type: [4, 4], width: 1 } });
+      // Its label would run into Release's when the two are close: the figures below name it instead.
+      const close = Math.abs(tq - w.hq) * 6 < view.keys.length;
+      lines.push({ xAxis: qLabel(tq), label: { show: !close, formatter: 'Cluster take-off', color: c.muted }, lineStyle: { color: c.muted, type: [4, 4], width: 1 } });
     }
     return {
       ...b,
@@ -64,8 +66,9 @@ export default function WaveChart({ w, nb, self, tq, s }: {
   const yrs = (q: number) => `${q / 4} year${q === 4 ? '' : 's'}`;
   return (
     <Section title="Follower wave" rangeId="wave"
-      sub={<>Share of each quarter’s releases that closely match {self.name} (other developers only). Shaded: {yrs(s.wave.before)} before
-        and 6 months–{yrs(s.wave.after[1])} after release, the windows the lift compares.</>}>
+      sub={<>Share of each quarter’s releases that {lens ? 'match the lens' : `closely match ${self.name}`} (other developers only).
+        Shaded: {yrs(s.wave.before)} before and 6 months–{yrs(s.wave.after[1])} after release, the windows the lift compares;
+        the dashed line is when the cluster took off.</>}>
       <QueryState q={nb} height={300}>
         {!w ? <div className="empty">{self.soon || !self.date ? 'Not released yet: the wave is measured from release.' : 'Loading…'}</div>
           : !option ? <div className="empty">Nothing in this date range.</div>
@@ -88,6 +91,7 @@ export default function WaveChart({ w, nb, self, tq, s }: {
                 <div><dt>Lift</dt><dd>{w.lift != null ? `×${w.lift.toFixed(1)}` : '–'}</dd></div>
                 <div><dt>Extra games</dt><dd>{fmtInt(Math.round(w.excess))}</dd></div>
                 <div><dt>Followers</dt><dd>{fmtInt(w.nAfter)}</dd></div>
+                <div><dt>Take-off</dt><dd>{tq != null ? qLabel(tq) : 'none'}</dd></div>
               </dl>
             </>
           )}

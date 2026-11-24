@@ -167,7 +167,9 @@ function GraphView({ self, rows, s, dataDate }: { self: Nb; rows: Nb[]; s: GameS
   );
 }
 
-export default function Influence({ nb, self, s, dataDate }: { nb: UseQueryResult<Neighbors>; self: Nb; s: GameSettings; dataDate: string }) {
+export default function Influence({ nb, self, s, dataDate, lensKey }: {
+  nb: UseQueryResult<Neighbors>; self: Nb; s: GameSettings; dataDate: string; lensKey: string;
+}) {
   const [floor] = useFloor();
   const [gen, setGen] = useState(0);
   const ready = nb.data && !nb.isPlaceholderData;
@@ -175,8 +177,9 @@ export default function Influence({ nb, self, s, dataDate }: { nb: UseQueryResul
     <Section title="Influence graph"
       controls={<button className="btn small ghost" onClick={() => setGen(x => x + 1)}>Reset</button>}
       sub={<>{self.name} with up to {PER_GEN} likely influences (similar earlier hits) and {PER_GEN} biggest followers (similar later games).
-        Click a game, then follow the chain a generation back or forward. Arrows run from older to newer.</>}>
-      {ready ? <GraphView key={`${self.appid}|${s.minSim}|${s.wText}|${JSON.stringify(floor)}|${gen}`} self={self} rows={nb.data!.rows} s={s} dataDate={dataDate} />
+        Click a game, then follow the chain a generation back or forward. Arrows run from older to newer.
+        {lensKey ? ' The first ring comes from the lens; expanding another game uses its own similar games.' : ''}</>}>
+      {ready ? <GraphView key={`${self.appid}|${s.minSim}|${s.wText}|${JSON.stringify(floor)}|${gen}|${lensKey}`} self={self} rows={nb.data!.rows} s={s} dataDate={dataDate} />
         : nb.error ? <div className="empty">Couldn’t load: {(nb.error as Error).message}</div>
         : <div className="skel" style={{ height: 460 }} aria-label="Loading" />}
     </Section>

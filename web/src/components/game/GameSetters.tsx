@@ -5,7 +5,7 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { fmtDate, fmtInt } from '../../lib/format';
-import { originator, setterCandidates, wave, type Nb, type Wave } from '../../lib/lineage';
+import { countsMap, originator, setterCandidates, wave, type Nb, type Wave } from '../../lib/lineage';
 import { qLabel } from '../../lib/trends';
 import { useWaves, type GameSettings, type Neighbors } from '../../state/game';
 import { useScopedRange } from '../../state/range';
@@ -15,9 +15,9 @@ import { GameLink, QueryState, Section, Th } from '../tags/common';
 type K = 'name' | 'date' | 'reviews' | 'sim' | 'lift' | 'after';
 const MAX_WAVES = 48; // follower waves fetched (12 per call): the default rows, or the most-reviewed when showing all
 
-export default function GameSetters({ nb, self, selfWave, tq, s, tot, dataDate, onPick }: {
+export default function GameSetters({ nb, self, selfWave, tq, s, tot, dataDate, onPick, lens }: {
   nb: UseQueryResult<Neighbors>; self: Nb; selfWave: Wave | null; tq: number | null; s: GameSettings;
-  tot: Map<number, number> | null; dataDate: string; onPick: (g: Nb) => void;
+  tot: Map<number, number> | null; dataDate: string; onPick: (g: Nb) => void; lens: boolean;
 }) {
   const { range } = useScopedRange('gsetters');
   const { dataQ, firstQ } = useAxis();
@@ -35,18 +35,21 @@ export default function GameSetters({ nb, self, selfWave, tq, s, tot, dataDate, 
     const pool = all ? [...every].sort((a, b) => b.reviews - a.reviews) : shown;
     return pool.filter(g => g.appid !== self.appid).slice(0, MAX_WAVES).map(g => g.appid).sort((a, b) => a - b);
   }, [all, every, shown, self.appid]);
-  const { waves, loading, error } = useWaves(want, s, !!nb.data);
+  // A lens is one cluster, so each game's lift there is how much that cluster grew after it came out
+  // (no extra queries). Otherwise each game's own look-alikes, fetched a few at a time.
+  const { waves, loading, error } = useWaves(want, s, !!nb.data && !lens);
   const waveOf = useMemo(() => {
     const m = new Map<number, Wave>();
     if (selfWave) m.set(self.appid, selfWave);
     if (tot && dataQ != null) {
+      const cluster = lens && nb.data ? countsMap(nb.data.counts, true) : null;
       for (const g of every) {
-        const c = waves.get(g.appid);
-        if (c && g.q != null) m.set(g.appid, wave(c, tot, g.q, firstQ, dataQ, s.wave));
+        const c = cluster ?? waves.get(g.appid);
+        if (c && g.q != null && !m.has(g.appid)) m.set(g.appid, wave(c, tot, g.q, firstQ, dataQ, s.wave));
       }
     }
     return m;
-  }, [waves, every, tot, dataQ, firstQ, s.wave, selfWave, self.appid]);
+  }, [waves, every, tot, dataQ, firstQ, s.wave, selfWave, self.appid, lens, nb.data]);
 
   const sorted = useMemo(() => {
     if (!all) return shown;
@@ -94,8 +97,9 @@ export default function GameSetters({ nb, self, selfWave, tq, s, tot, dataDate, 
         {all ? 'Earliest hits only' : `Show all (${fmtInt(every.length)})`}</button>}
       sub={<>{all ? 'Every similar game released up to this one with 200+ reviews. Click a heading to sort.'
         : `Similar hits (${fmtInt(s.hitReviews)}+ reviews) released up to this game, earliest first.`}
-        {' '}Lift = how much more common close look-alikes became 6 months–{s.wave.after[1] / 4} years after it; followers = how many came out.
-        {all && every.length > MAX_WAVES + 1 ? ` Waves load for the ${MAX_WAVES} most-reviewed.` : ''}{error ? ` Couldn’t load some waves: ${error.message}` : ''}</>}>
+        {lens ? <>{' '}Lift = how much more common games matching the lens became 6 months–{s.wave.after[1] / 4} years after it came out; followers = how many came out.</>
+          : <>{' '}Lift = how much more common close look-alikes became 6 months–{s.wave.after[1] / 4} years after it; followers = how many came out.</>}
+        {all && !lens && every.length > MAX_WAVES + 1 ? ` Waves load for the ${MAX_WAVES} most-reviewed.` : ''}{error ? ` Couldn’t load some waves: ${error.message}` : ''}</>}>
       <QueryState q={nb} height={240}>
         {shown.length ? (
           <div className={all ? 'tscroll tset-scroll' : undefined}>

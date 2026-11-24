@@ -51,7 +51,7 @@ export function lensOverlap(lens: LensTag[], b: { tag_ids: number[]; tag_w: numb
     if (q <= 0) continue;
     const y = vb.get(id);
     const wa = Math.round((q / top) * 100);
-    if (y == null) { missing.push({ id, w: wa }); continue; }
+    if (y == null) { if (wa >= 5) missing.push({ id, w: wa }); continue; }
     score += q * y;
     shared.push({ id, wa, wb: wb.get(id)!, contrib: q * y });
   }

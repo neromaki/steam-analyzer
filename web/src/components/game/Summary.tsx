@@ -17,9 +17,9 @@ const VERDICT: Record<VerdictKind, [string, string]> = {
 
 const yrs = (q: number) => `${q / 4} years`;
 
-export default function Summary({ nb, self, w, tq, verdict, released, dataDate, s }: {
+export default function Summary({ nb, self, w, tq, verdict, released, dataDate, s, lens }: {
   nb: UseQueryResult<Neighbors>; self: Nb; w: Wave | null; tq: number | null; verdict: VerdictKind; released: boolean; dataDate: string;
-  s: GameSettings;
+  s: GameSettings; lens: boolean;
 }) {
   if (!nb.data) return <div className="kpis skel" style={{ height: 64 }} aria-label="Loading" />;
   const rows = nb.data.rows;
@@ -28,7 +28,7 @@ export default function Summary({ nb, self, w, tq, verdict, released, dataDate, 
   const after = rows.length - before - soon;
   const [vt, vd] = VERDICT[verdict];
   const tiles: [string, ReactNode, ReactNode?][] = [
-    ['Similar games', fmtInt(nb.data.n), `${fmtInt(before)} before · ${fmtInt(after)} after · ${fmtInt(soon)} coming soon${nb.data.truncated ? ' (top 3,000 shown)' : ''}`],
+    [lens ? 'Lens matches' : 'Similar games', fmtInt(nb.data.n), `${fmtInt(before)} before · ${fmtInt(after)} after · ${fmtInt(soon)} coming soon${nb.data.truncated ? ' (top 3,000 shown)' : ''}`],
     ['Cluster take-off', tq != null ? qLabel(tq) : 'None', tq != null ? 'share of releases sustainably 1.5× its prior level' : 'no sustained rise in similar games'],
     ['Wave', <span className={`verdict v-${verdict}`}>{vt}</span>, vd],
   ];

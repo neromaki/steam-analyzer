@@ -3,6 +3,7 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { fmtDate, fmtInt } from '../../lib/format';
+import { addExample, isActive, removeExample, type Lens } from '../../lib/lens';
 import { inMonths, isReleased, type Nb } from '../../lib/lineage';
 import type { Neighbors } from '../../state/game';
 import { useScopedRange } from '../../state/range';
@@ -12,8 +13,8 @@ type K = 'name' | 'date' | 'reviews' | 'pct' | 'sim';
 type Which = 'after' | 'before' | 'soon';
 const PAGE = 100;
 
-export default function LookAlikes({ nb, self, dataDate, onPick }: {
-  nb: UseQueryResult<Neighbors>; self: Nb; dataDate: string; onPick: (g: Nb) => void;
+export default function LookAlikes({ nb, self, dataDate, onPick, lens, setLens }: {
+  nb: UseQueryResult<Neighbors>; self: Nb; dataDate: string; onPick: (g: Nb) => void; lens: Lens; setLens: (l: Lens) => void;
 }) {
   const { range } = useScopedRange('look');
   const [which, setWhich] = useChoice<Which>('la', ['after', 'before', 'soon'] as const, 'after');
@@ -47,11 +48,28 @@ export default function LookAlikes({ nb, self, dataDate, onPick }: {
   }, [groups, which, sort]);
 
   const label = (w: Which, l: string) => `${l} (${fmtInt(groups[w].length)})`;
+  const like = new Set(lens.like), not = new Set(lens.not);
+  // Refine the lens from the list: + makes a game an example, − a counter-example.
+  const lensCell = (g: Nb) => (
+    <td className="lens-act">
+      {like.has(g.appid) || not.has(g.appid)
+        ? <button className="btn tiny ghost" onClick={() => setLens(removeExample(lens, g.appid))}
+                  title={like.has(g.appid) ? 'An example: click to remove it from the lens' : 'A counter-example: click to remove it from the lens'}
+                  aria-label={`Remove ${g.name} from the lens`}>{like.has(g.appid) ? '✓' : '✕'}</button>
+        : <>
+          <button className="btn tiny ghost" onClick={() => setLens(addExample(lens, g.appid, 'like', self.appid))}
+                  title="More like this: add it to the lens as an example" aria-label={`More like ${g.name}`}>+</button>
+          <button className="btn tiny ghost" onClick={() => setLens(addExample(lens, g.appid, 'not', self.appid))}
+                  title="Less like this: add it to the lens as a counter-example" aria-label={`Less like ${g.name}`}>−</button>
+        </>}
+    </td>
+  );
   return (
     <Section title="Look-alikes" rangeId="look"
       controls={<Seg label="Which look-alikes" value={which} onChange={v => { setWhich(v); setN(PAGE); }}
         options={[['after', label('after', 'After it')], ['before', label('before', 'Before it')], ['soon', label('soon', 'Coming soon')]]} />}
-      sub={<>Games at least this similar to {self.name}, by similarity. Click a similarity score to see which tags and how much of the description they share.
+      sub={<>{isActive(lens) ? 'Games matching the lens' : `Games at least this similar to ${self.name}`}, by similarity. Click a similarity score to see which tags and
+        how much of the description they share. Use + and − to refine the lens with more like this or less like this.
         {which === 'soon' ? ' Coming-soon games ignore the date range.' : ''}</>}>
       <QueryState q={nb} height={300}>
         {sorted.length ? (
@@ -64,15 +82,19 @@ export default function LookAlikes({ nb, self, dataDate, onPick }: {
                 <Th k="pct" label="Positive" sort={sort} setSort={setSort} num />
                 <Th k="sim" label="Similarity" sort={sort} setSort={setSort} num title="Blended score: tags and description" />
                 <th className="num" title="Tag score / description score">Tags · text</th>
+                <th title="Refine the lens: more like this (+) or less like this (−)">Lens</th>
               </tr></thead>
               <tbody>{sorted.slice(0, n).map(g => (
                 <tr key={g.appid}>
-                  <td className="wrap"><GameLink appid={g.appid} name={g.name} /><div className="tset-sub"><span className="faint">{g.dev} · </span><TagNames ids={g.tags} max={4} /></div></td>
+                  <td className="wrap"><GameLink appid={g.appid} name={g.name} />
+                    {like.has(g.appid) && <span className="badge accent">example</span>}{not.has(g.appid) && <span className="badge">counter-example</span>}
+                    <div className="tset-sub"><span className="faint">{g.dev} · </span><TagNames ids={g.tags} max={4} /></div></td>
                   <td>{fmtDate(g.date, g.soon)}</td>
                   <td className="num">{fmtInt(g.reviews)}</td>
                   <td className="num">{g.reviews >= 10 ? `${g.pct}%` : <span className="faint">–</span>}</td>
                   <td className="num"><button className="linkish" onClick={() => onPick(g)} title="Why it’s similar">{g.sim.toFixed(2)}</button></td>
                   <td className="num faint">{g.ts.toFixed(2)} · {g.xs.toFixed(2)}</td>
+                  {lensCell(g)}
                 </tr>
               ))}</tbody>
             </table>
