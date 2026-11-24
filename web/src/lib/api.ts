@@ -123,6 +123,14 @@ export interface SimParams { wText: number; minSim: number }
  *  all released matches: [release_q, n_all, n_other_developers]. */
 export const gameNeighbors = (appid: number, p: SimParams & { limit?: number }, f: Floor) =>
   rpc<{ n: number; counts: [number, number, number][]; rows: Neighbor[] }>('game_neighbors', { p_appid: appid, p, f });
+/** A lens tag: [tagid, weight (unit vector), weight before counter-examples, examples with it, factor or null]. */
+export type LensTag = [number, number, number, number, number | null];
+export interface LensParams { like: number[]; not: number[]; tw: Record<string, number>; wText: number; minSim?: number; limit?: number }
+/** gameNeighbors for a lens: the anchor plus `like` as examples, `not` as counter-examples. Without
+ *  minSim the cut-off takes in every example. examples: [appid, sim, tag_sim, text_sim]. */
+export const lensNeighbors = (appid: number, p: LensParams, f: Floor) =>
+  rpc<{ n: number; minSim: number; lens: LensTag[]; examples: [number, number, number, number][]; counts: [number, number, number][]; rows: Neighbor[] }>(
+    'lens_neighbors', { p_appid: appid, p, f });
 /** Follower counts per quarter (other developers, released) for up to 12 games: [[appid, [[q, n]]]]. */
 export const gameWaves = (appids: number[], p: SimParams, f: Floor) =>
   rpc<[number, [number, number][]][]>('game_waves', { p_appids: appids, p, f });

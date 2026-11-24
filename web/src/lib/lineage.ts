@@ -140,7 +140,7 @@ export function originator(cands: Nb[], tq: number | null): Nb | null {
 export interface TagPart { id: number; wa: number; wb: number; contrib: number } // contrib: share of the tag score
 
 /** Normalised fingerprint (vote weight × idf over content tags), as in the pipeline. */
-function fp(ids: number[], w: number[], byId: Map<number, Tag>): Map<number, number> {
+export function fingerprint(ids: number[], w: number[], byId: Map<number, Tag>): Map<number, number> {
   const v = new Map<number, number>();
   let ss = 0;
   ids.forEach((id, i) => {
@@ -159,7 +159,7 @@ function fp(ids: number[], w: number[], byId: Map<number, Tag>): Map<number, num
  * and their part of the tag similarity, plus the tags only one of them has.
  */
 export function tagOverlap(a: { tag_ids: number[]; tag_w: number[] }, b: { tag_ids: number[]; tag_w: number[] }, byId: Map<number, Tag>) {
-  const va = fp(a.tag_ids, a.tag_w, byId), vb = fp(b.tag_ids, b.tag_w, byId);
+  const va = fingerprint(a.tag_ids, a.tag_w, byId), vb = fingerprint(b.tag_ids, b.tag_w, byId);
   const wa = new Map(a.tag_ids.map((id, i) => [id, a.tag_w[i] ?? 0])), wb = new Map(b.tag_ids.map((id, i) => [id, b.tag_w[i] ?? 0]));
   let score = 0;
   const shared: TagPart[] = [];

@@ -3,10 +3,11 @@
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { configured, fetchGame, gameNeighbors, gameWaves, type SimParams } from '../lib/api';
+import { configured, fetchGame, gameNeighbors, gameWaves, lensNeighbors, type LensTag, type SimParams } from '../lib/api';
 import type { Floor } from '../lib/floor';
 import { WAVE_DEFAULTS, toNb, type Nb, type WaveOpts } from '../lib/lineage';
-import { linkWith } from '../lib/url';
+import { fmtFactors, isActive, parseFactors, type Lens } from '../lib/lens';
+import { idsParam, linkWith, setIds, useUpdateParams } from '../lib/url';
 import { useFloor } from './floor';
 import { useAxis } from './theme';
 
@@ -16,7 +17,10 @@ const fk = (x: unknown) => JSON.stringify(x);
 /** Settings that follow you from game page to game page. */
 export const GAME_KEYS = ['sim', 'wt', 'hr', 'wb', 'wa'] as const;
 
-export interface GameSettings extends SimParams { hitReviews: number; wave: WaveOpts; defaults: SimParams & { hitReviews: number } }
+export interface GameSettings extends SimParams {
+  hitReviews: number; wave: WaveOpts; defaults: SimParams & { hitReviews: number };
+  simSet: boolean; // similarity chosen in the URL (a lens otherwise picks its own)
+}
 
 const num = (sp: URLSearchParams, k: string, lo: number, hi: number, d: number) => {
   const v = Number(sp.get(k));
@@ -33,6 +37,7 @@ export function useGameSettings(): GameSettings {
     hitReviews: num(sp, 'hr', 100, 100000, ax.hitReviews),
     wave: { before: num(sp, 'wb', 4, 12, WAVE_DEFAULTS.before), after: [WAVE_DEFAULTS.after[0], num(sp, 'wa', 8, 16, WAVE_DEFAULTS.after[1])] },
     defaults: { minSim: ax.minSim, wText: ax.wText, hitReviews: ax.hitReviews },
+    simSet: sp.has('sim'),
   }), [key, ax.minSim, ax.wText, ax.hitReviews]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
@@ -49,7 +54,31 @@ export function useGame(appid: number) {
   });
 }
 
-export interface Neighbors { n: number; counts: [number, number, number][]; rows: Nb[]; truncated: boolean }
+export interface LensInfo {
+  minSim: number;                 // the cut-off used
+  tags: LensTag[];
+  examples: Map<number, { sim: number; ts: number; xs: number }>; // every example and counter-example
+}
+
+export interface Neighbors { n: number; counts: [number, number, number][]; rows: Nb[]; truncated: boolean; lens?: LensInfo }
+
+/** The game page's lens (example games, counter-examples, tag factors), in the URL. Not carried to other games. */
+export const LENS_KEYS = ['lk', 'ln', 'lw'] as const;
+
+export function useLens(): [Lens, (l: Lens) => void] {
+  const [sp] = useSearchParams();
+  const update = useUpdateParams();
+  const key = LENS_KEYS.map(k => sp.get(k) ?? '').join('|');
+  const lens = useMemo<Lens>(() => ({ like: idsParam(sp, 'lk'), not: idsParam(sp, 'ln'), tw: parseFactors(sp.get('lw')) }),
+    [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = useCallback((l: Lens) => update(n => {
+    setIds(n, 'lk', l.like);
+    setIds(n, 'ln', l.not);
+    const f = fmtFactors(l.tw);
+    if (f) n.set('lw', f); else n.delete('lw');
+  }, { push: true }), [update]);
+  return [lens, set];
+}
 
 export const NB_LIMIT = 3000;
 
@@ -66,10 +95,32 @@ export function neighborsQuery(appid: number, s: SimParams, floor: Floor, limit 
   };
 }
 
-export function useNeighbors(appid: number, s: SimParams, enabled = true) {
+/** Query definition for a lens around a game. Without an explicit similarity, the database picks
+ *  a cut-off that takes in every example. */
+export function lensQuery(appid: number, s: GameSettings, lens: Lens, floor: Floor, limit = NB_LIMIT) {
+  const p = {
+    like: lens.like, not: lens.not, tw: Object.fromEntries(lens.tw), wText: s.wText, limit,
+    ...(s.simSet || !lens.like.length ? { minSim: s.minSim } : {}),
+  };
+  return {
+    queryKey: ['lens_neighbors', appid, fk(p), fk(floor)],
+    queryFn: async (): Promise<Neighbors> => {
+      const r = await lensNeighbors(appid, p, floor);
+      return {
+        n: r.n, counts: r.counts, rows: r.rows.map(toNb), truncated: r.n > r.rows.length,
+        lens: { minSim: r.minSim, tags: r.lens, examples: new Map(r.examples.map(([id, sim, ts, xs]) => [id, { sim, ts, xs }])) },
+      };
+    },
+    staleTime: HOUR, gcTime: HOUR,
+  };
+}
+
+/** The page's similar games: a single game's, or its lens's when the lens has anything in it. */
+export function useNeighbors(appid: number, s: GameSettings, lens?: Lens, enabled = true) {
   const [floor] = useFloor();
-  return useQuery({
-    ...neighborsQuery(appid, s, floor), placeholderData: keepPreviousData,
+  const q = lens && isActive(lens) ? lensQuery(appid, s, lens, floor) : neighborsQuery(appid, s, floor);
+  return useQuery<Neighbors>({
+    ...q, placeholderData: keepPreviousData,
     enabled: configured && enabled && Number.isInteger(appid) && appid > 0,
   });
 }
